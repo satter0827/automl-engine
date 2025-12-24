@@ -20,6 +20,9 @@ Thumbs.db
 *.log
 *.tmp
 
+# Python packaging
+*.egg-info/
+
 # documents
 _build/
 _build/**
@@ -27,3 +30,10 @@ _build/**
 .doctrees/**
 api/
 api/**
+
+# pytest
+.pytest_cache/
+.coverage
+
+# other
+delete_catche.bat
