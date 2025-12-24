@@ -21,5 +21,9 @@ Thumbs.db
 *.tmp
 
 # documents
-/build/
-/source/generated/
+_build/
+_build/**
+.doctrees/
+.doctrees/**
+api/
+api/**
