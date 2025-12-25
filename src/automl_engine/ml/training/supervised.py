@@ -18,12 +18,12 @@ def run_supervised(
     X: Any,
     y: Any,
     *,
-    algorithms: dict[str, Callable],
-    metrics: dict[str, Callable],
+    algorithms: dict[str, dict[str, Callable[..., Any]]],
+    metrics: dict[str, dict[str, Callable[..., Any]]],
     primary_metric_key: str,
     preprocess: Optional[Pipeline | ColumnTransformer] = None,
     cv: BaseCrossValidator,
-    search_method: Literal["grid", "optuna"] = "grid",
+    search_method: Optional[Literal["grid", "optuna"]] = "grid",
     optuna_trials: int = 50,
     optuna_timeout: Optional[int] = None,
     sample_weight: Optional[Any] = None,
@@ -61,7 +61,7 @@ def run_supervised(
         if search_method == "grid":
             # グリッドサーチで学習・評価を実行
             est, info = _run_grid(
-                factory=factory,
+                factory=factory["estimator_cls"],
                 scorers=scorers,
                 primary_metric_key=primary_metric_key,
                 preprocess=preprocess,
@@ -74,7 +74,7 @@ def run_supervised(
         elif search_method == "optuna":
             # Optuna で学習・評価・探索を実行
             est, info = _run_optuna(
-                factory=factory,
+                factory=factory["estimator_cls"],
                 scorers=scorers,
                 primary_metric_key=primary_metric_key,
                 preprocess=preprocess,

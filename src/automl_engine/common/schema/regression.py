@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -42,7 +42,7 @@ class RegressionAnalyzerConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def normalize(cls, values: dict) -> dict:
+    def normalize_before(cls, values: dict) -> dict:
         """
         入力値を正規化する.
 
@@ -70,7 +70,7 @@ class RegressionAnalyzerConfig(BaseModel):
         return values
 
     @model_validator(mode="after")
-    def validate(self) -> RegressionAnalyzerConfig:
+    def validate_after(self) -> RegressionAnalyzerConfig:
         """
         フィールド間の整合性を検証する.
 
@@ -94,13 +94,13 @@ class RegressionAnalyzerConfig(BaseModel):
             raise ValueError("feature_columns contains columns not found in data.")
 
         # ignore と feature の重複禁止
-        if set(self.ignore_columns) & set(self.feature_columns):
+        if set(self.ignore_columns or []) & set(self.feature_columns):
             raise ValueError("ignore_columns must not overlap with feature_columns.")
 
         # column_types の自動補完
         for col in self.data.columns:
-            if col not in self.column_types:
-                self.column_types[col] = str(self.data[col].dtype)
+            if col not in (self.column_types or {}):
+                (self.column_types or {})[col] = str(self.data[col].dtype)
 
         return self
 
@@ -155,45 +155,66 @@ class RegressionTrainConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    algorithms: Optional[str | list[str] | dict[str, dict[str, Callable]]] = None
-    metrics: Optional[str | list[str] | dict[str, dict[str, Callable]]] = None
+    algorithms: Optional[str | list[str] | dict[str, dict[str, Callable[..., Any]]]] = (
+        None
+    )
+    metrics: Optional[str | list[str] | dict[str, dict[str, Callable[..., float]]]] = (
+        None
+    )
     primary_metric_key: Optional[str] = None
-    search_method: Literal["grid", "optuna"] = "grid"
+    search_method: Optional[Literal["grid", "optuna"]] = None
     optuna_trials: int = Field(50, ge=1)
     optuna_timeout: Optional[int] = Field(None, ge=1)
 
-    @model_validator(mode="after")
-    def normalize(self) -> RegressionTrainConfig:
+    @model_validator(mode="before")
+    @classmethod
+    def normalize(cls, values: Any) -> Any:
         """
-        入力をレジストリ型へ正規化する.
+        入力をレジストリ型へ正規化する（before）.
 
-        Returns:
-            RegressionTrainConfig: 正規化済みインスタンス.
+        Args:
+            values: 入力値の辞書.
         """
-        # アルゴリズム
-        if isinstance(self.algorithms, str):
-            self.algorithms = [self.algorithms]
+        if values is None:
+            return values
 
-        if self.algorithms is None:
-            self.algorithms = REGRESSION_MODEL_REGISTRY
+        # 辞書以外はそのまま返す
+        if isinstance(values, dict):
+            data: dict[str, Any] = dict(values)
+        else:
+            return values
 
-        elif isinstance(self.algorithms, list):
-            self.algorithms = {k: REGRESSION_MODEL_REGISTRY[k] for k in self.algorithms}
+        # algorithms 正規化
+        alg_in = data.get("algorithms")
+        if isinstance(alg_in, str):
+            alg_in = [alg_in]
 
-        # メトリクス
-        if isinstance(self.metrics, str):
-            self.metrics = [self.metrics]
+        if alg_in is None:
+            data["algorithms"] = REGRESSION_MODEL_REGISTRY
+        elif isinstance(alg_in, list):
+            data["algorithms"] = {k: REGRESSION_MODEL_REGISTRY[k] for k in alg_in}
+        else:
+            data["algorithms"] = alg_in
 
-        if self.metrics is None:
-            self.metrics = REGRESSION_METRIC_REGISTRY
+        # metrics 正規化
+        met_in = data.get("metrics")
 
-        elif isinstance(self.metrics, list):
-            self.metrics = {k: REGRESSION_METRIC_REGISTRY[k] for k in self.metrics}
+        if isinstance(met_in, str):
+            met_in = [met_in]
 
-        # プライマリメトリクス
-        if self.primary_metric_key is None:
-            self.primary_metric_key = next(iter(self.metrics.keys()), None)
+        if met_in is None:
+            data["metrics"] = REGRESSION_METRIC_REGISTRY
+        elif isinstance(met_in, list):
+            data["metrics"] = {k: REGRESSION_METRIC_REGISTRY[k] for k in met_in}
+        else:
+            data["metrics"] = met_in
 
-        return self
-        return self
-        return self
+        # primary_metric_key の自動設定
+        pmk = data.get("primary_metric_key")
+        metrics_dict = data.get("metrics")
+
+        if pmk is None and isinstance(metrics_dict, dict):
+            data["primary_metric_key"] = next(iter(metrics_dict.keys()), None)
+
+        return data
+        return data

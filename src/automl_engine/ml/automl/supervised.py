@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Callable, Literal, Optional, cast
 
 import pandas as pd
 from sklearn.base import BaseEstimator
@@ -70,7 +70,8 @@ class RegressionAnalyzer:
 
         # 不要なカラムを削除
         if drop_unused_columns:
-            used_columns = set(validated.feature_columns) | {validated.target_column}
+            feature_cols = validated.feature_columns or []
+            used_columns = set(feature_cols) | {validated.target_column}
             validated.data = validated.data[list(used_columns)]
 
         # 検証済み設定をインスタンス変数に保存
@@ -84,13 +85,14 @@ class RegressionAnalyzer:
         # インスタンス変数に設定を反映
         self._is_prepared = False
         self._is_trained = False
-        self.estimators_ = {}
-        self.cv_results_ = {}
-        self.preprocess = None
-        self.cv = 5
-        self.search_method = None
+
+        self.estimators_: dict[str, BaseEstimator] = {}
+        self.cv_results_: dict[str, BaseCrossValidator] = {}
+        self.preprocess: Optional[Pipeline | ColumnTransformer] = None
+        self.cv: int | BaseCrossValidator = 5
+        self.search_method: Optional[Literal["grid", "optuna"]] = None
         self.optuna_trials = 50
-        self.optuna_timeout = None
+        self.optuna_timeout: Optional[int] = None
 
     def prepare(
         self,
@@ -125,14 +127,16 @@ class RegressionAnalyzer:
         y = self.data[self.target_column]
 
         # cvが整数の場合、KFoldインスタンスに変換
-        if isinstance(cv, int):
-            self.cv = KFold(
-                n_splits=cv,
+        if isinstance(validated.cv, int):
+            cv_obj = KFold(
+                n_splits=validated.cv,
                 shuffle=True,
                 random_state=self.random_state,
             )
         else:
-            self.cv = cv
+            cv_obj = validated.cv
+
+        self.cv = cv_obj
 
         # クロスバリデーションの分割結果を生成
         cv_splits = [
@@ -141,7 +145,7 @@ class RegressionAnalyzer:
                 "train_idx": train_idx,
                 "valid_idx": valid_idx,
             }
-            for i, (train_idx, valid_idx) in enumerate(self.cv.split(X_prepared))
+            for i, (train_idx, valid_idx) in enumerate(cv_obj.split(X_prepared))
         ]
 
         # prepare完了フラグを立てる
@@ -155,8 +159,8 @@ class RegressionAnalyzer:
                 "is_preprocessed": self.preprocess is not None,
             },
             "cv": {
-                "strategy": type(self.cv).__name__,
-                "n_splits": self.cv.get_n_splits(),
+                "strategy": type(cv_obj).__name__,
+                "n_splits": cv_obj.get_n_splits(),
                 "splits": cv_splits,
             },
             "overview": {
@@ -168,8 +172,12 @@ class RegressionAnalyzer:
 
     def train(
         self,
-        algorithms: Optional[str | list[str] | dict[str, dict[str, Callable]]] = None,
-        metrics: Optional[str | list[str] | dict[str, dict[str, Callable]]] = None,
+        algorithms: Optional[
+            str | list[str] | dict[str, dict[str, Callable[..., Any]]]
+        ] = None,
+        metrics: Optional[
+            str | list[str] | dict[str, dict[str, Callable[..., Any]]]
+        ] = None,
         primary_metric_key: Optional[str] = None,
         search_method: Optional[Literal["grid", "optuna"]] = None,
         optuna_trials: int = 50,
@@ -200,18 +208,26 @@ class RegressionAnalyzer:
             optuna_trials=optuna_trials,
             optuna_timeout=optuna_timeout,
         )
-
+        if isinstance(validated.algorithms, dict):
+            self.algorithms = validated.algorithms
+        if isinstance(validated.metrics, dict):
+            self.metrics = validated.metrics
+        if validated.primary_metric_key:
+            self.primary_metric_key = validated.primary_metric_key
         self.search_method = validated.search_method
         self.optuna_trials = validated.optuna_trials
         self.optuna_timeout = validated.optuna_timeout
+
+        if isinstance(self.algorithms, dict):
+            validated.algorithms = self.algorithms
 
         # 学習・評価・探索を実行
         self.fitted_model, self.model_info = run_supervised(
             X=self.data[self.feature_columns],
             y=self.data[self.target_column],
-            algorithms=algorithms,
-            metrics=metrics,
-            primary_metric_key=primary_metric_key,
+            algorithms=self.algorithms,
+            metrics=self.metrics,
+            primary_metric_key=self.primary_metric_key,
             preprocess=self.preprocess,
             cv=self.cv,
             search_method=self.search_method,
