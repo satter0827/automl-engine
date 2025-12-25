@@ -1,4 +1,9 @@
 # AutoML Engine — AI アプリケーション向け機械学習基盤
+
+[![CI](https://github.com/satter0827/automl-engine/actions/workflows/ci.yml/badge.svg)](
+https://github.com/satter0827/automl-engine/actions/workflows/ci.yml
+)
+
 [English README is here](README.md)
 
 ---

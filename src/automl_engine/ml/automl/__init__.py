@@ -5,6 +5,6 @@ AutoML 実行パッケージ。
 
 from __future__ import annotations
 
-from . import template
+from . import supervised
 
-__all__: list[str] = ["template"]
+__all__: list[str] = ["supervised"]

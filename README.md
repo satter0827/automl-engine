@@ -1,5 +1,9 @@
 # AutoML Engine — Machine Learning Core for AI Applications
 
+[![CI](https://github.com/satter0827/automl-engine/actions/workflows/ci.yml/badge.svg)](
+https://github.com/satter0827/automl-engine/actions/workflows/ci.yml
+)
+
 [日本語版はこちら](README.ja.md)
 
 ---
