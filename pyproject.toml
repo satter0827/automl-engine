@@ -11,7 +11,6 @@ readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "takafumi nishiwaki" }]
 
-# 依存ゼロ or 最小に保つ
 dependencies = []
 
 [project.optional-dependencies]
