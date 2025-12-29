@@ -57,7 +57,11 @@ class LoggerManager:
             return self._loggers[name]
 
         # 設定ファイルから設定を読み込む
-        config = self._load_config(config_file) if config_file else self._default_config.copy()
+        config = (
+            self._load_config(config_file)
+            if config_file
+            else self._default_config.copy()
+        )
 
         # 引数でレベルが指定された場合は上書き
         if level:
@@ -200,7 +204,9 @@ class LoggerManager:
         return self._loggers.get(name)
 
     def shutdown(self) -> None:
-        """全てのロガーとハンドラをシャットダウンする."""
+        """
+        全てのロガーとハンドラをシャットダウンする.
+        """
         for logger in self._loggers.values():
             for handler in logger.handlers[:]:
                 handler.close()
