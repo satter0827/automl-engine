@@ -11,6 +11,7 @@ from typing import Any, Callable, Literal, Optional
 
 import joblib
 import optuna
+import ray
 from sklearn.base import BaseEstimator
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import make_scorer
@@ -254,7 +255,9 @@ def _execute_algorithm(
             )
         elif search_method is None:
             # search_method=None の場合はデフォルトで grid を使用
-            logger.warning(f"アルゴリズム '{key}': search_method が None のため grid を使用")
+            logger.warning(
+                f"アルゴリズム '{key}': search_method が None のため grid を使用"
+            )
             est, info = _run_grid(
                 factory=factory["estimator_cls"],
                 scorers=scorers,
@@ -348,7 +351,9 @@ def _run_parallel_joblib(
     # tqdm で進捗表示
     with tqdm(total=len(algorithms), desc="アルゴリズム実行", unit="algo") as pbar:
         # タイムアウトを考慮した並列実行
-        parallel = joblib.Parallel(n_jobs=n_jobs, backend="loky", timeout=algorithm_timeout)
+        parallel = joblib.Parallel(
+            n_jobs=n_jobs, backend="loky", timeout=algorithm_timeout
+        )
 
         try:
             # 完了した順に結果を取得
@@ -500,7 +505,10 @@ def _run_parallel_concurrent(
                 except Exception as e:
                     logger.error(f"アルゴリズム '{key}' が失敗: {str(e)}")
                     progress_info["failed"].append(key)
-                    progress_info["results"][key] = {"status": "failed", "error": str(e)}
+                    progress_info["results"][key] = {
+                        "status": "failed",
+                        "error": str(e),
+                    }
 
                 finally:
                     pbar.update(1)
@@ -553,12 +561,6 @@ def _run_parallel_ray(
     Raises:
         ImportError: Ray がインストールされていない場合.
     """
-    try:
-        import ray
-    except ImportError:
-        raise ImportError(
-            "Ray バックエンドを使用するには ray をインストールしてください: pip install ray"
-        )
 
     # Ray の初期化（既に初期化済みでなければ）
     if not ray.is_initialized():
@@ -640,13 +642,19 @@ def _run_parallel_ray(
                     estimators[key_result] = est
                     results[key_result] = info
                     progress_info["completed"] += 1
-                    progress_info["results"][key_result] = {"status": "success", "info": info}
+                    progress_info["results"][key_result] = {
+                        "status": "success",
+                        "info": info,
+                    }
                     logger.info(f"アルゴリズム '{key_result}' が成功")
 
                 except Exception as e:
                     logger.error(f"アルゴリズム '{key}' が失敗: {str(e)}")
                     progress_info["failed"].append(key)
-                    progress_info["results"][key] = {"status": "failed", "error": str(e)}
+                    progress_info["results"][key] = {
+                        "status": "failed",
+                        "error": str(e),
+                    }
 
                 finally:
                     pbar.update(1)
