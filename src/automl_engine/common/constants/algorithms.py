@@ -4,6 +4,8 @@ AutoML 実行時に使用可能な分類モデルを辞書形式で定義する�
 
 from __future__ import annotations
 
+from catboost import CatBoostClassifier, CatBoostRegressor
+from lightgbm import LGBMClassifier, LGBMRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import (
     ElasticNet,
@@ -14,6 +16,7 @@ from sklearn.linear_model import (
 )
 from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import SVC, SVR
+from xgboost import XGBClassifier, XGBRegressor
 
 # 分類モデル定義レジストリ。
 CLASSIFICATION_MODEL_REGISTRY = {
@@ -100,6 +103,73 @@ CLASSIFICATION_MODEL_REGISTRY = {
                     "low": 1e-10,
                     "high": 1e-6,
                 },
+            },
+        },
+    },
+    "xgboost": {
+        "label": "XGBoost (GPU)",
+        "estimator_cls": XGBClassifier,
+        "init_params": {
+            "tree_method": "gpu_hist",
+            "predictor": "gpu_predictor",
+            "eval_metric": "logloss",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {
+                "max_depth": [3, 6, 10],
+                "learning_rate": [0.05, 0.1, 0.2],
+                "n_estimators": [200, 500],
+                "subsample": [0.8, 1.0],
+                "colsample_bytree": [0.8, 1.0],
+            },
+            "optuna": {
+                "max_depth": {"type": "int", "low": 3, "high": 12},
+                "learning_rate": {"type": "loguniform", "low": 1e-2, "high": 3e-1},
+                "n_estimators": {"type": "int", "low": 100, "high": 800},
+                "subsample": {"type": "uniform", "low": 0.6, "high": 1.0},
+                "colsample_bytree": {"type": "uniform", "low": 0.6, "high": 1.0},
+            },
+        },
+    },
+    "lightgbm": {
+        "label": "LightGBM (GPU)",
+        "estimator_cls": LGBMClassifier,
+        "init_params": {
+            "device_type": "gpu",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {
+                "n_estimators": [200, 500],
+                "learning_rate": [0.05, 0.1, 0.2],
+                "num_leaves": [31, 63, 127],
+            },
+            "optuna": {
+                "n_estimators": {"type": "int", "low": 100, "high": 800},
+                "learning_rate": {"type": "loguniform", "low": 1e-2, "high": 3e-1},
+                "num_leaves": {"type": "int", "low": 16, "high": 256},
+            },
+        },
+    },
+    "catboost": {
+        "label": "CatBoost (GPU)",
+        "estimator_cls": CatBoostClassifier,
+        "init_params": {
+            "task_type": "GPU",
+            "verbose": False,
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {
+                "depth": [6, 8, 10],
+                "learning_rate": [0.05, 0.1, 0.2],
+                "iterations": [200, 500],
+            },
+            "optuna": {
+                "depth": {"type": "int", "low": 4, "high": 12},
+                "learning_rate": {"type": "loguniform", "low": 1e-2, "high": 3e-1},
+                "iterations": {"type": "int", "low": 100, "high": 800},
             },
         },
     },
@@ -252,6 +322,72 @@ REGRESSION_MODEL_REGISTRY = {
                     "type": "categorical",
                     "choices": ["sqrt", "log2", None],
                 },
+            },
+        },
+    },
+    "xgboost": {
+        "label": "XGBoost (GPU)",
+        "estimator_cls": XGBRegressor,
+        "init_params": {
+            "tree_method": "gpu_hist",
+            "predictor": "gpu_predictor",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {
+                "max_depth": [3, 6, 10],
+                "learning_rate": [0.05, 0.1, 0.2],
+                "n_estimators": [200, 500],
+                "subsample": [0.8, 1.0],
+                "colsample_bytree": [0.8, 1.0],
+            },
+            "optuna": {
+                "max_depth": {"type": "int", "low": 3, "high": 12},
+                "learning_rate": {"type": "loguniform", "low": 1e-2, "high": 3e-1},
+                "n_estimators": {"type": "int", "low": 100, "high": 800},
+                "subsample": {"type": "uniform", "low": 0.6, "high": 1.0},
+                "colsample_bytree": {"type": "uniform", "low": 0.6, "high": 1.0},
+            },
+        },
+    },
+    "lightgbm": {
+        "label": "LightGBM (GPU)",
+        "estimator_cls": LGBMRegressor,
+        "init_params": {
+            "device_type": "gpu",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {
+                "n_estimators": [200, 500],
+                "learning_rate": [0.05, 0.1, 0.2],
+                "num_leaves": [31, 63, 127],
+            },
+            "optuna": {
+                "n_estimators": {"type": "int", "low": 100, "high": 800},
+                "learning_rate": {"type": "loguniform", "low": 1e-2, "high": 3e-1},
+                "num_leaves": {"type": "int", "low": 16, "high": 256},
+            },
+        },
+    },
+    "catboost": {
+        "label": "CatBoost (GPU)",
+        "estimator_cls": CatBoostRegressor,
+        "init_params": {
+            "task_type": "GPU",
+            "verbose": False,
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {
+                "depth": [6, 8, 10],
+                "learning_rate": [0.05, 0.1, 0.2],
+                "iterations": [200, 500],
+            },
+            "optuna": {
+                "depth": {"type": "int", "low": 4, "high": 12},
+                "learning_rate": {"type": "loguniform", "low": 1e-2, "high": 3e-1},
+                "iterations": {"type": "int", "low": 100, "high": 800},
             },
         },
     },
