@@ -4,14 +4,22 @@
 
 from __future__ import annotations
 
+import logging
+import multiprocessing
+from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
 from typing import Any, Callable, Literal, Optional
 
+import joblib
 import optuna
 from sklearn.base import BaseEstimator
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import make_scorer
 from sklearn.model_selection import BaseCrossValidator, cross_validate
 from sklearn.pipeline import Pipeline
+from tqdm import tqdm
+
+# ロガーの初期化
+logger = logging.getLogger(__name__)
 
 
 def run_supervised(
@@ -28,9 +36,13 @@ def run_supervised(
     optuna_timeout: Optional[int] = None,
     sample_weight: Optional[Any] = None,
     groups: Optional[Any] = None,
+    n_jobs: int = -1,
+    n_jobs_cv: Optional[int] = None,
+    parallel_backend: Literal["joblib", "concurrent", "ray"] = "joblib",
+    algorithm_timeout: Optional[int] = None,
 ) -> tuple[dict[str, BaseEstimator], dict[str, dict[str, Any]]]:
     """
-    教師あり学習の学習・評価・探索を実行する.
+    教師あり学習の学習・評価・探索を実行する（並列化対応）.
 
     Args:
         X: 特徴量データ.
@@ -45,6 +57,10 @@ def run_supervised(
         optuna_timeout: Optuna のタイムアウト秒数.
         sample_weight: サンプル重み.
         groups: CV 用グループ.
+        n_jobs: アルゴリズム並列数（-1で全コア使用）.
+        n_jobs_cv: CV並列数（Noneで自動計算）.
+        parallel_backend: 並列バックエンド（joblib / concurrent / ray）.
+        algorithm_timeout: アルゴリズムごとのタイムアウト秒数.
 
     Returns:
         学習済み推定器と評価結果の辞書.
@@ -52,13 +68,156 @@ def run_supervised(
     # 評価指標の scorers を作成
     scorers = _build_scoring(metrics)
 
-    # 各アルゴリズムで学習・評価・探索を実行
+    # CPU コア数の取得
+    cpu_count = multiprocessing.cpu_count()
+
+    # n_jobs の正規化（-1 は全コア使用）
+    if n_jobs == -1:
+        n_jobs_normalized = cpu_count
+    else:
+        n_jobs_normalized = min(n_jobs, cpu_count)
+
+    # n_jobs_cv の自動計算
+    if n_jobs_cv is None:
+        # アルゴリズム並列数を考慮して CV 並列数を自動計算
+        n_jobs_cv = max(1, cpu_count // n_jobs_normalized)
+    else:
+        n_jobs_cv = n_jobs_cv
+
+    logger.info(
+        f"並列実行開始: アルゴリズム数={len(algorithms)}, "
+        f"n_jobs={n_jobs_normalized}, n_jobs_cv={n_jobs_cv}, "
+        f"backend={parallel_backend}"
+    )
+
+    # 進捗情報の初期化
+    progress_info: dict[str, Any] = {
+        "total": len(algorithms),
+        "completed": 0,
+        "running": [],
+        "failed": [],
+        "results": {},
+    }
+
+    # 各アルゴリズムで学習・評価・探索を並列実行
     estimators: dict[str, BaseEstimator] = {}
     results: dict[str, dict[str, Any]] = {}
 
-    # アルゴリズムごとに処理を実行
-    for key, factory in algorithms.items():
-        print(key)
+    # 並列バックエンドを選択して実行
+    if parallel_backend == "joblib":
+        estimators, results, progress_info = _run_parallel_joblib(
+            algorithms=algorithms,
+            scorers=scorers,
+            primary_metric_key=primary_metric_key,
+            preprocess=preprocess,
+            cv=cv,
+            X=X,
+            y=y,
+            search_method=search_method,
+            optuna_trials=optuna_trials,
+            optuna_timeout=optuna_timeout,
+            sample_weight=sample_weight,
+            groups=groups,
+            n_jobs=n_jobs_normalized,
+            n_jobs_cv=n_jobs_cv,
+            algorithm_timeout=algorithm_timeout,
+            progress_info=progress_info,
+        )
+    elif parallel_backend == "concurrent":
+        estimators, results, progress_info = _run_parallel_concurrent(
+            algorithms=algorithms,
+            scorers=scorers,
+            primary_metric_key=primary_metric_key,
+            preprocess=preprocess,
+            cv=cv,
+            X=X,
+            y=y,
+            search_method=search_method,
+            optuna_trials=optuna_trials,
+            optuna_timeout=optuna_timeout,
+            sample_weight=sample_weight,
+            groups=groups,
+            n_jobs=n_jobs_normalized,
+            n_jobs_cv=n_jobs_cv,
+            algorithm_timeout=algorithm_timeout,
+            progress_info=progress_info,
+        )
+    elif parallel_backend == "ray":
+        estimators, results, progress_info = _run_parallel_ray(
+            algorithms=algorithms,
+            scorers=scorers,
+            primary_metric_key=primary_metric_key,
+            preprocess=preprocess,
+            cv=cv,
+            X=X,
+            y=y,
+            search_method=search_method,
+            optuna_trials=optuna_trials,
+            optuna_timeout=optuna_timeout,
+            sample_weight=sample_weight,
+            groups=groups,
+            n_jobs=n_jobs_normalized,
+            n_jobs_cv=n_jobs_cv,
+            algorithm_timeout=algorithm_timeout,
+            progress_info=progress_info,
+        )
+    else:
+        raise ValueError(f"未サポートのバックエンド: {parallel_backend}")
+
+    # 全アルゴリズムが失敗した場合は例外を送出
+    if not estimators:
+        raise RuntimeError(
+            f"全アルゴリズムが失敗しました。失敗アルゴリズム: {progress_info['failed']}"
+        )
+
+    logger.info(
+        f"並列実行完了: 成功={len(estimators)}, 失敗={len(progress_info['failed'])}"
+    )
+
+    # 結果を返す
+    return estimators, results
+
+
+def _execute_algorithm(
+    key: str,
+    factory: dict[str, Any],
+    scorers: dict[str, Any],
+    primary_metric_key: str,
+    preprocess: Optional[Pipeline | ColumnTransformer],
+    cv: BaseCrossValidator,
+    X: Any,
+    y: Any,
+    search_method: Optional[str],
+    optuna_trials: int,
+    optuna_timeout: Optional[int],
+    sample_weight: Optional[Any],
+    groups: Optional[Any],
+    n_jobs_cv: int,
+) -> tuple[str, BaseEstimator, dict[str, Any]]:
+    """
+    単一アルゴリズムの学習・評価を実行するヘルパー関数.
+
+    Args:
+        key: アルゴリズムキー.
+        factory: 推定器生成 Callable を含む辞書.
+        scorers: 評価指標 scorers.
+        primary_metric_key: 主評価指標キー.
+        preprocess: 前処理.
+        cv: クロスバリデーション.
+        X: 特徴量.
+        y: 目的変数.
+        search_method: 探索手法.
+        optuna_trials: Optuna 試行回数.
+        optuna_timeout: Optuna タイムアウト秒数.
+        sample_weight: サンプル重み.
+        groups: CV 用グループ.
+        n_jobs_cv: CV 並列数.
+
+    Returns:
+        アルゴリズムキー、学習済み推定器、評価情報のタプル.
+    """
+    try:
+        logger.info(f"アルゴリズム '{key}' の実行開始")
 
         if search_method == "grid":
             # グリッドサーチで学習・評価を実行
@@ -72,6 +231,7 @@ def run_supervised(
                 y=y,
                 sample_weight=sample_weight,
                 groups=groups,
+                n_jobs_cv=n_jobs_cv,
             )
         elif search_method == "optuna":
             # Optuna で学習・評価・探索を実行
@@ -87,17 +247,395 @@ def run_supervised(
                 optuna_timeout=optuna_timeout,
                 sample_weight=sample_weight,
                 groups=groups,
+                n_jobs_cv=n_jobs_cv,
             )
         else:
             # パラメタチューニングを行わずに学習・評価を実行
-            pass
+            raise ValueError(f"未サポートの探索手法: {search_method}")
 
-        # 結果を格納
-        estimators[key] = est
-        results[key] = info
+        logger.info(f"アルゴリズム '{key}' の実行完了")
+        return key, est, info
 
-    # 結果を返す
-    return estimators, results
+    except Exception as e:
+        logger.error(f"アルゴリズム '{key}' の実行中にエラーが発生: {str(e)}")
+        raise
+
+
+def _run_parallel_joblib(
+    algorithms: dict[str, dict[str, Any]],
+    scorers: dict[str, Any],
+    primary_metric_key: str,
+    preprocess: Optional[Pipeline | ColumnTransformer],
+    cv: BaseCrossValidator,
+    X: Any,
+    y: Any,
+    search_method: Optional[str],
+    optuna_trials: int,
+    optuna_timeout: Optional[int],
+    sample_weight: Optional[Any],
+    groups: Optional[Any],
+    n_jobs: int,
+    n_jobs_cv: int,
+    algorithm_timeout: Optional[int],
+    progress_info: dict[str, Any],
+) -> tuple[dict[str, BaseEstimator], dict[str, dict[str, Any]], dict[str, Any]]:
+    """
+    joblib を使用した並列実行.
+
+    Args:
+        algorithms: アルゴリズム定義.
+        scorers: 評価指標 scorers.
+        primary_metric_key: 主評価指標キー.
+        preprocess: 前処理.
+        cv: クロスバリデーション.
+        X: 特徴量.
+        y: 目的変数.
+        search_method: 探索手法.
+        optuna_trials: Optuna 試行回数.
+        optuna_timeout: Optuna タイムアウト秒数.
+        sample_weight: サンプル重み.
+        groups: CV 用グループ.
+        n_jobs: 並列数.
+        n_jobs_cv: CV 並列数.
+        algorithm_timeout: アルゴリズムタイムアウト秒数.
+        progress_info: 進捗情報.
+
+    Returns:
+        学習済み推定器、評価結果、進捗情報のタプル.
+    """
+    estimators: dict[str, BaseEstimator] = {}
+    results: dict[str, dict[str, Any]] = {}
+
+    # joblib で並列実行（タイムアウトは個別に処理）
+    tasks = [
+        joblib.delayed(_execute_algorithm)(
+            key=key,
+            factory=factory,
+            scorers=scorers,
+            primary_metric_key=primary_metric_key,
+            preprocess=preprocess,
+            cv=cv,
+            X=X,
+            y=y,
+            search_method=search_method,
+            optuna_trials=optuna_trials,
+            optuna_timeout=optuna_timeout,
+            sample_weight=sample_weight,
+            groups=groups,
+            n_jobs_cv=n_jobs_cv,
+        )
+        for key, factory in algorithms.items()
+    ]
+
+    # tqdm で進捗表示
+    with tqdm(total=len(algorithms), desc="アルゴリズム実行", unit="algo") as pbar:
+        # タイムアウトを考慮した並列実行
+        parallel = joblib.Parallel(n_jobs=n_jobs, backend="loky", timeout=algorithm_timeout)
+
+        try:
+            # 完了した順に結果を取得
+            for result in parallel(tasks):
+                key, est, info = result
+                estimators[key] = est
+                results[key] = info
+                progress_info["completed"] += 1
+                progress_info["results"][key] = {"status": "success", "info": info}
+                pbar.update(1)
+
+        except Exception as e:
+            # 一部失敗してもエラーログを記録して続行
+            logger.error(f"並列実行中にエラーが発生: {str(e)}")
+
+            # タスクを個別に実行して失敗したものを特定
+            for key, factory in algorithms.items():
+                if key in estimators:
+                    continue
+
+                try:
+                    result = _execute_algorithm(
+                        key=key,
+                        factory=factory,
+                        scorers=scorers,
+                        primary_metric_key=primary_metric_key,
+                        preprocess=preprocess,
+                        cv=cv,
+                        X=X,
+                        y=y,
+                        search_method=search_method,
+                        optuna_trials=optuna_trials,
+                        optuna_timeout=optuna_timeout,
+                        sample_weight=sample_weight,
+                        groups=groups,
+                        n_jobs_cv=n_jobs_cv,
+                    )
+                    key_result, est, info = result
+                    estimators[key_result] = est
+                    results[key_result] = info
+                    progress_info["completed"] += 1
+                    progress_info["results"][key] = {"status": "success", "info": info}
+                    pbar.update(1)
+
+                except Exception as algo_error:
+                    logger.error(f"アルゴリズム '{key}' が失敗: {str(algo_error)}")
+                    progress_info["failed"].append(key)
+                    progress_info["results"][key] = {
+                        "status": "failed",
+                        "error": str(algo_error),
+                    }
+                    pbar.update(1)
+
+    return estimators, results, progress_info
+
+
+def _run_parallel_concurrent(
+    algorithms: dict[str, dict[str, Any]],
+    scorers: dict[str, Any],
+    primary_metric_key: str,
+    preprocess: Optional[Pipeline | ColumnTransformer],
+    cv: BaseCrossValidator,
+    X: Any,
+    y: Any,
+    search_method: Optional[str],
+    optuna_trials: int,
+    optuna_timeout: Optional[int],
+    sample_weight: Optional[Any],
+    groups: Optional[Any],
+    n_jobs: int,
+    n_jobs_cv: int,
+    algorithm_timeout: Optional[int],
+    progress_info: dict[str, Any],
+) -> tuple[dict[str, BaseEstimator], dict[str, dict[str, Any]], dict[str, Any]]:
+    """
+    concurrent.futures を使用した並列実行.
+
+    Args:
+        algorithms: アルゴリズム定義.
+        scorers: 評価指標 scorers.
+        primary_metric_key: 主評価指標キー.
+        preprocess: 前処理.
+        cv: クロスバリデーション.
+        X: 特徴量.
+        y: 目的変数.
+        search_method: 探索手法.
+        optuna_trials: Optuna 試行回数.
+        optuna_timeout: Optuna タイムアウト秒数.
+        sample_weight: サンプル重み.
+        groups: CV 用グループ.
+        n_jobs: 並列数.
+        n_jobs_cv: CV 並列数.
+        algorithm_timeout: アルゴリズムタイムアウト秒数.
+        progress_info: 進捗情報.
+
+    Returns:
+        学習済み推定器、評価結果、進捗情報のタプル.
+    """
+    estimators: dict[str, BaseEstimator] = {}
+    results: dict[str, dict[str, Any]] = {}
+
+    # ThreadPoolExecutor を使用（lambda がピクル化できないため）
+    with ThreadPoolExecutor(max_workers=n_jobs) as executor:
+        # タスクを送信
+        future_to_key = {
+            executor.submit(
+                _execute_algorithm,
+                key=key,
+                factory=factory,
+                scorers=scorers,
+                primary_metric_key=primary_metric_key,
+                preprocess=preprocess,
+                cv=cv,
+                X=X,
+                y=y,
+                search_method=search_method,
+                optuna_trials=optuna_trials,
+                optuna_timeout=optuna_timeout,
+                sample_weight=sample_weight,
+                groups=groups,
+                n_jobs_cv=n_jobs_cv,
+            ): key
+            for key, factory in algorithms.items()
+        }
+
+        # tqdm で進捗表示
+        with tqdm(total=len(algorithms), desc="アルゴリズム実行", unit="algo") as pbar:
+            # 完了した順に結果を取得
+            for future in as_completed(future_to_key):
+                key = future_to_key[future]
+
+                try:
+                    # タイムアウトを指定して結果を取得
+                    key_result, est, info = future.result(timeout=algorithm_timeout)
+                    estimators[key_result] = est
+                    results[key_result] = info
+                    progress_info["completed"] += 1
+                    progress_info["results"][key] = {"status": "success", "info": info}
+                    logger.info(f"アルゴリズム '{key}' が成功")
+
+                except TimeoutError:
+                    logger.error(f"アルゴリズム '{key}' がタイムアウト")
+                    progress_info["failed"].append(key)
+                    progress_info["results"][key] = {
+                        "status": "failed",
+                        "error": "タイムアウト",
+                    }
+
+                except Exception as e:
+                    logger.error(f"アルゴリズム '{key}' が失敗: {str(e)}")
+                    progress_info["failed"].append(key)
+                    progress_info["results"][key] = {"status": "failed", "error": str(e)}
+
+                finally:
+                    pbar.update(1)
+
+    return estimators, results, progress_info
+
+
+def _run_parallel_ray(
+    algorithms: dict[str, dict[str, Any]],
+    scorers: dict[str, Any],
+    primary_metric_key: str,
+    preprocess: Optional[Pipeline | ColumnTransformer],
+    cv: BaseCrossValidator,
+    X: Any,
+    y: Any,
+    search_method: Optional[str],
+    optuna_trials: int,
+    optuna_timeout: Optional[int],
+    sample_weight: Optional[Any],
+    groups: Optional[Any],
+    n_jobs: int,
+    n_jobs_cv: int,
+    algorithm_timeout: Optional[int],
+    progress_info: dict[str, Any],
+) -> tuple[dict[str, BaseEstimator], dict[str, dict[str, Any]], dict[str, Any]]:
+    """
+    Ray を使用した並列実行（オプション）.
+
+    Args:
+        algorithms: アルゴリズム定義.
+        scorers: 評価指標 scorers.
+        primary_metric_key: 主評価指標キー.
+        preprocess: 前処理.
+        cv: クロスバリデーション.
+        X: 特徴量.
+        y: 目的変数.
+        search_method: 探索手法.
+        optuna_trials: Optuna 試行回数.
+        optuna_timeout: Optuna タイムアウト秒数.
+        sample_weight: サンプル重み.
+        groups: CV 用グループ.
+        n_jobs: 並列数.
+        n_jobs_cv: CV 並列数.
+        algorithm_timeout: アルゴリズムタイムアウト秒数.
+        progress_info: 進捗情報.
+
+    Returns:
+        学習済み推定器、評価結果、進捗情報のタプル.
+
+    Raises:
+        ImportError: Ray がインストールされていない場合.
+    """
+    try:
+        import ray
+    except ImportError:
+        raise ImportError(
+            "Ray バックエンドを使用するには ray をインストールしてください: pip install ray"
+        )
+
+    # Ray の初期化（既に初期化済みでなければ）
+    if not ray.is_initialized():
+        ray.init(num_cpus=n_jobs, ignore_reinit_error=True)
+
+    # リモート関数として登録
+    @ray.remote
+    def execute_remote(
+        key: str,
+        factory: dict[str, Any],
+        scorers: dict[str, Any],
+        primary_metric_key: str,
+        preprocess: Optional[Pipeline | ColumnTransformer],
+        cv: BaseCrossValidator,
+        X: Any,
+        y: Any,
+        search_method: Optional[str],
+        optuna_trials: int,
+        optuna_timeout: Optional[int],
+        sample_weight: Optional[Any],
+        groups: Optional[Any],
+        n_jobs_cv: int,
+    ) -> tuple[str, BaseEstimator, dict[str, Any]]:
+        return _execute_algorithm(
+            key=key,
+            factory=factory,
+            scorers=scorers,
+            primary_metric_key=primary_metric_key,
+            preprocess=preprocess,
+            cv=cv,
+            X=X,
+            y=y,
+            search_method=search_method,
+            optuna_trials=optuna_trials,
+            optuna_timeout=optuna_timeout,
+            sample_weight=sample_weight,
+            groups=groups,
+            n_jobs_cv=n_jobs_cv,
+        )
+
+    estimators: dict[str, BaseEstimator] = {}
+    results: dict[str, dict[str, Any]] = {}
+
+    # タスクを送信
+    futures = [
+        execute_remote.remote(
+            key=key,
+            factory=factory,
+            scorers=scorers,
+            primary_metric_key=primary_metric_key,
+            preprocess=preprocess,
+            cv=cv,
+            X=X,
+            y=y,
+            search_method=search_method,
+            optuna_trials=optuna_trials,
+            optuna_timeout=optuna_timeout,
+            sample_weight=sample_weight,
+            groups=groups,
+            n_jobs_cv=n_jobs_cv,
+        )
+        for key, factory in algorithms.items()
+    ]
+
+    # tqdm で進捗表示
+    with tqdm(total=len(algorithms), desc="アルゴリズム実行", unit="algo") as pbar:
+        # 完了した順に結果を取得
+        while futures:
+            # タイムアウト付きで待機
+            ready, not_ready = ray.wait(
+                futures, timeout=algorithm_timeout if algorithm_timeout else None
+            )
+
+            for future in ready:
+                try:
+                    key, est, info = ray.get(future)
+                    estimators[key] = est
+                    results[key] = info
+                    progress_info["completed"] += 1
+                    progress_info["results"][key] = {"status": "success", "info": info}
+                    logger.info(f"アルゴリズム '{key}' が成功")
+
+                except Exception as e:
+                    # キー情報を取得（エラー時）
+                    key = "unknown"
+                    logger.error(f"アルゴリズム '{key}' が失敗: {str(e)}")
+                    progress_info["failed"].append(key)
+                    progress_info["results"][key] = {"status": "failed", "error": str(e)}
+
+                finally:
+                    pbar.update(1)
+
+            futures = not_ready
+
+    return estimators, results, progress_info
 
 
 def _build_scoring(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -151,6 +689,7 @@ def _run_grid(
     y: Any,
     sample_weight: Optional[Any],
     groups: Optional[Any],
+    n_jobs_cv: int = -1,
 ) -> tuple[BaseEstimator, dict[str, Any]]:
     """
     Grid（固定パラメータ）で学習・評価を行う.
@@ -165,6 +704,7 @@ def _run_grid(
         y: 目的変数.
         sample_weight: サンプル重み.
         groups: CV 用グループ.
+        n_jobs_cv: CV 並列数.
 
     Returns:
         学習済み推定器と評価情報.
@@ -184,7 +724,7 @@ def _run_grid(
         y=y,
         scoring=scorers,
         cv=cv,
-        n_jobs=-1,
+        n_jobs=n_jobs_cv,
         params=params,
         return_train_score=False,
     )
@@ -213,6 +753,7 @@ def _run_optuna(
     optuna_timeout: Optional[int],
     sample_weight: Optional[Any],
     groups: Optional[Any],
+    n_jobs_cv: int = -1,
 ) -> tuple[BaseEstimator, dict[str, Any]]:
     """
     Optuna によるハイパーパラメータ探索を行う.
@@ -229,6 +770,7 @@ def _run_optuna(
         optuna_timeout: タイムアウト秒数.
         sample_weight: サンプル重み.
         groups: CV 用グループ.
+        n_jobs_cv: CV 並列数.
 
     Returns:
         学習済み推定器と評価情報.
@@ -259,7 +801,7 @@ def _run_optuna(
             y=y,
             scoring=scorers,
             cv=cv,
-            n_jobs=-1,
+            n_jobs=n_jobs_cv,
             params=params,
             return_train_score=False,
         )
@@ -289,7 +831,7 @@ def _run_optuna(
         y=y,
         scoring=scorers,
         cv=cv,
-        n_jobs=-1,
+        n_jobs=n_jobs_cv,
         params=params,
         return_train_score=False,
     )
