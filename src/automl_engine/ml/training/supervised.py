@@ -609,7 +609,7 @@ def _run_parallel_ray(
             n_jobs_cv=n_jobs_cv,
         )
 
-    execute_remote_task = cast(Any, ray.remote(execute_remote))
+    execute_remote_task = cast(Any, ray.remote(cast(Any, execute_remote)))
 
     estimators: dict[str, BaseEstimator] = {}
     results: dict[str, dict[str, Any]] = {}
@@ -1085,4 +1085,6 @@ def _fit_params(
         return {"model__sample_weight": sample_weight}
 
     # それ以外はそのまま返す
+    return {"sample_weight": sample_weight}
+    return {"sample_weight": sample_weight}
     return {"sample_weight": sample_weight}
