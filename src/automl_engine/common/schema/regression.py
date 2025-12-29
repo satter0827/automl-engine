@@ -187,6 +187,12 @@ class RegressionTrainConfig(BaseModel):
             for k, spec in v.items():
                 if not isinstance(spec, dict):
                     raise TypeError(f"Algorithm spec must be dict: {k!r}")
+                # Validate that the key exists in the registry
+                if str(k) not in REGRESSION_MODEL_REGISTRY:
+                    raise ValueError(
+                        f"Unknown algorithm key: {k!r}. "
+                        f"Valid keys are: {list(REGRESSION_MODEL_REGISTRY.keys())}"
+                    )
                 out2[str(k)] = dict(spec)
             return out2
 
@@ -237,6 +243,12 @@ class RegressionTrainConfig(BaseModel):
             for k, spec in v.items():
                 if not isinstance(spec, dict):
                     raise TypeError(f"Metric spec must be dict: {k!r}")
+                # Validate that the key exists in the registry
+                if str(k) not in REGRESSION_METRIC_REGISTRY:
+                    raise ValueError(
+                        f"Unknown metric key: {k!r}. "
+                        f"Valid keys are: {list(REGRESSION_METRIC_REGISTRY.keys())}"
+                    )
                 out2[str(k)] = _ensure_spec(str(k), spec)
             return out2
 
