@@ -266,19 +266,10 @@ def _execute_algorithm(
                 n_jobs_cv=n_jobs_cv,
             )
         elif search_method is None:
-<<<<<<< HEAD
-            # search_method=None の場合はデフォルトで grid を使用
-            logger.warning(
-                f"アルゴリズム '{key}': search_method が None のため grid を使用"
-            )
-            est, info = _run_grid(
-                factory=factory["estimator_cls"],
-=======
             # デフォルトパラメータでクロスバリデーションを実行
             est, info = _run_default(
                 estimator_cls=factory["estimator_cls"],
                 init_params=factory.get("init_params", {}),
->>>>>>> 746f799aa4cfc4cff4429a336fca46ea5567c491
                 scorers=scorers,
                 primary_metric_key=primary_metric_key,
                 preprocess=preprocess,
@@ -817,7 +808,8 @@ def _run_grid(
 
     # 結果の返却
     cv_scores_mean = {
-        k: float(grid_search.cv_results_[f"mean_test_{k}"][grid_search.best_index_]) for k in scorers
+        k: float(grid_search.cv_results_[f"mean_test_{k}"][grid_search.best_index_])
+        for k in scorers
     }
     return best_model, {
         "search_method": "grid",
@@ -897,7 +889,9 @@ def _run_optuna(
                     )
                 elif param_type == "int_or_none":
                     # None を含む整数の選択
-                    if trial.suggest_categorical(f"{param_name}_is_none", [True, False]):
+                    if trial.suggest_categorical(
+                        f"{param_name}_is_none", [True, False]
+                    ):
                         trial_params[param_name] = None
                     else:
                         trial_params[param_name] = trial.suggest_int(
@@ -1090,4 +1084,5 @@ def _fit_params(
         return {"model__sample_weight": sample_weight}
 
     # それ以外はそのまま返す
+    return {"sample_weight": sample_weight}
     return {"sample_weight": sample_weight}
