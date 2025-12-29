@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, Optional, cast
+from typing import Any, Callable, Literal, Optional
 
 import pandas as pd
 from sklearn.base import BaseEstimator
@@ -12,6 +12,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import BaseCrossValidator, KFold
 from sklearn.pipeline import Pipeline
 
+from automl_engine.common.constants.algorithms import REGRESSION_MODEL_REGISTRY
+from automl_engine.common.constants.metrics import REGRESSION_METRIC_REGISTRY
 from automl_engine.common.schema.regression import (
     RegressionAnalyzerConfig,
     RegressionAnalyzerPrepareConfig,
@@ -201,13 +203,15 @@ class RegressionAnalyzer:
 
         # 設定の正規化と検証を実行
         validated = RegressionTrainConfig(
-            algorithms=algorithms,
-            metrics=metrics,
+            algorithms=algorithms or REGRESSION_MODEL_REGISTRY,
+            metrics=metrics or REGRESSION_METRIC_REGISTRY,
             primary_metric_key=primary_metric_key,
             search_method=search_method,
             optuna_trials=optuna_trials,
             optuna_timeout=optuna_timeout,
         )
+
+        # インスタンス変数に設定を反映
         if isinstance(validated.algorithms, dict):
             self.algorithms = validated.algorithms
         if isinstance(validated.metrics, dict):
@@ -217,9 +221,6 @@ class RegressionAnalyzer:
         self.search_method = validated.search_method
         self.optuna_trials = validated.optuna_trials
         self.optuna_timeout = validated.optuna_timeout
-
-        if isinstance(self.algorithms, dict):
-            validated.algorithms = self.algorithms
 
         # 学習・評価・探索を実行
         self.fitted_model, self.model_info = run_supervised(

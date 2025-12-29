@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .mypy_cache
+.ruff_cache/
 
 # Virtual environments
 .venv/
@@ -38,3 +39,5 @@ api/**
 # other
 delete_catche.bat
 .bk/
+notebook/
+notebook/**

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -142,79 +142,113 @@ class RegressionAnalyzerPrepareConfig(BaseModel):
 
 class RegressionTrainConfig(BaseModel):
     """
-    train() 入力を正規化するスキーマ.
+    train() 入力を正規化するスキーマ（回帰）.
 
     Attributes:
-        algorithms: 推定器生成 Callable 群.
-        metrics: 評価指標 Callable 群.
-        primary_metric_key: 最適化対象の評価指標キー.
-        search_method: ハイパーパラメータ探索手法（"grid" または "optuna"）.
-        optuna_trials: Optuna を使用する場合の試行回数.
-        optuna_timeout: Optuna を使用する場合のタイムアウト時間（秒）.
+        algorithms: 使用するアルゴリズムの指定.
+        metrics: 使用する評価指標の指定.
+        primary_metric_key: 主評価指標キー.
+        search_method: ハイパーパラメータ探索手法.
+        optuna_trials: Optuna 試行回数.
+        optuna_timeout: Optuna タイムアウト秒数.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    algorithms: Optional[str | list[str] | dict[str, dict[str, Callable[..., Any]]]] = (
-        None
-    )
-    metrics: Optional[str | list[str] | dict[str, dict[str, Callable[..., float]]]] = (
-        None
-    )
-    primary_metric_key: Optional[str] = None
-    search_method: Optional[Literal["grid", "optuna"]] = None
-    optuna_trials: int = Field(50, ge=1)
-    optuna_timeout: Optional[int] = Field(None, ge=1)
+    algorithms: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    metrics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    primary_metric_key: str | None = None
 
-    @model_validator(mode="before")
+    search_method: Literal["grid", "optuna"] = "grid"
+    optuna_trials: int = Field(default=50, ge=1)
+    optuna_timeout: int | None = Field(default=None, ge=1)
+
+    @field_validator("algorithms", mode="before")
     @classmethod
-    def normalize(cls, values: Any) -> Any:
-        """
-        入力をレジストリ型へ正規化する（before）.
+    def _v_algorithms(cls, v: Any) -> dict[str, dict[str, Any]]:
+        if v is None:
+            return {k: dict(spec) for k, spec in REGRESSION_MODEL_REGISTRY.items()}
 
-        Args:
-            values: 入力値の辞書.
-        """
-        if values is None:
-            return values
+        if isinstance(v, str):
+            if v not in REGRESSION_MODEL_REGISTRY:
+                raise ValueError(f"Unknown algorithm key: {v!r}")
+            return {v: dict(REGRESSION_MODEL_REGISTRY[v])}
 
-        # 辞書以外はそのまま返す
-        if isinstance(values, dict):
-            data: dict[str, Any] = dict(values)
-        else:
-            return values
+        if isinstance(v, list) and not isinstance(v, (str, bytes)):
+            out: dict[str, dict[str, Any]] = {}
+            for key in v:
+                if key not in REGRESSION_MODEL_REGISTRY:
+                    raise ValueError(f"Unknown algorithm key: {key!r}")
+                out[str(key)] = dict(REGRESSION_MODEL_REGISTRY[str(key)])
+            return out
 
-        # algorithms 正規化
-        alg_in = data.get("algorithms")
-        if isinstance(alg_in, str):
-            alg_in = [alg_in]
+        if isinstance(v, dict):
+            out2: dict[str, dict[str, Any]] = {}
+            for k, spec in v.items():
+                if not isinstance(spec, dict):
+                    raise TypeError(f"Algorithm spec must be dict: {k!r}")
+                out2[str(k)] = dict(spec)
+            return out2
 
-        if alg_in is None:
-            data["algorithms"] = REGRESSION_MODEL_REGISTRY
-        elif isinstance(alg_in, list):
-            data["algorithms"] = {k: REGRESSION_MODEL_REGISTRY[k] for k in alg_in}
-        else:
-            data["algorithms"] = alg_in
+        raise TypeError("algorithms must be None, str, list[str], or dict[str, dict].")
 
-        # metrics 正規化
-        met_in = data.get("metrics")
+    @field_validator("metrics", mode="before")
+    @classmethod
+    def _v_metrics(cls, v: Any) -> dict[str, dict[str, Any]]:
+        def _ensure_spec(key: str, spec: dict[str, Any]) -> dict[str, Any]:
+            spec_dict = dict(spec)
+            if "scorer" not in spec_dict:
+                raise ValueError(f"Metric spec must contain 'scorer': {key!r}")
 
-        if isinstance(met_in, str):
-            met_in = [met_in]
+            scorer = spec_dict["scorer"]
+            if isinstance(scorer, dict):
+                score_func = scorer.get("score_func")
+                if not callable(score_func):
+                    raise ValueError(
+                        f"Metric scorer.score_func must be callable: {key!r}"
+                    )
+                kwargs = scorer.get("kwargs", {})
+                if not isinstance(kwargs, dict):
+                    raise ValueError(f"Metric scorer.kwargs must be dict: {key!r}")
+            return spec_dict
 
-        if met_in is None:
-            data["metrics"] = REGRESSION_METRIC_REGISTRY
-        elif isinstance(met_in, list):
-            data["metrics"] = {k: REGRESSION_METRIC_REGISTRY[k] for k in met_in}
-        else:
-            data["metrics"] = met_in
+        if v is None:
+            return {
+                k: _ensure_spec(k, spec)
+                for k, spec in REGRESSION_METRIC_REGISTRY.items()
+            }
 
-        # primary_metric_key の自動設定
-        pmk = data.get("primary_metric_key")
-        metrics_dict = data.get("metrics")
+        if isinstance(v, str):
+            if v not in REGRESSION_METRIC_REGISTRY:
+                raise ValueError(f"Unknown metric key: {v!r}")
+            return {v: _ensure_spec(v, REGRESSION_METRIC_REGISTRY[v])}
 
-        if pmk is None and isinstance(metrics_dict, dict):
-            data["primary_metric_key"] = next(iter(metrics_dict.keys()), None)
+        if isinstance(v, list) and not isinstance(v, (str, bytes)):
+            out: dict[str, dict[str, Any]] = {}
+            for key in v:
+                key_s = str(key)
+                if key_s not in REGRESSION_METRIC_REGISTRY:
+                    raise ValueError(f"Unknown metric key: {key_s!r}")
+                out[key_s] = _ensure_spec(key_s, REGRESSION_METRIC_REGISTRY[key_s])
+            return out
 
-        return data
-        return data
+        if isinstance(v, dict):
+            out2: dict[str, dict[str, Any]] = {}
+            for k, spec in v.items():
+                if not isinstance(spec, dict):
+                    raise TypeError(f"Metric spec must be dict: {k!r}")
+                out2[str(k)] = _ensure_spec(str(k), spec)
+            return out2
+
+        raise TypeError("metrics must be None, str, list[str], or dict[str, dict].")
+
+    @model_validator(mode="after")
+    def _v_primary_metric_key(self) -> "RegressionTrainConfig":
+        if not self.metrics:
+            raise ValueError("metrics must not be empty")
+        if self.primary_metric_key is None:
+            self.primary_metric_key = next(iter(self.metrics.keys()))
+            return self
+        if self.primary_metric_key not in self.metrics:
+            raise ValueError("primary_metric_key must exist in metrics")
+        return self

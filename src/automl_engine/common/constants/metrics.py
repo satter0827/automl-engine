@@ -1,77 +1,47 @@
 """
-評価指標定義レジストリ
+評価指標レジストリ.
+各エントリは {"label": str, "scorer": ...} の形を取る.
+
+scorer は以下を許容:
+- str: sklearn の scoring 名
+- callable: sklearn が受け付ける scorer callable（estimator, X, y -> float）
+- dict: make_scorer 用定義 {"score_func": callable, "greater_is_better": bool, "response_method": str, "kwargs": dict}
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Final
 
-from sklearn.metrics import (
-    accuracy_score,
-    f1_score,
-    mean_absolute_error,
-    r2_score,
-    roc_auc_score,
-    root_mean_squared_error,
-)
-
-# 分類指標定義レジストリ
-CLASSIFICATION_METRIC_REGISTRY: dict[str, dict[str, Any]] = {
-    "accuracy": {
-        "display_name": "Accuracy",
-        "direction": "maximize",
-        "scorer": accuracy_score,
-        "greater_is_better": True,
-    },
-    "f1_macro": {
-        "display_name": "F1 (macro)",
-        "direction": "maximize",
-        "scorer": lambda y_true, y_pred: f1_score(y_true, y_pred, average="macro"),
-        "greater_is_better": True,
-    },
-    "f1_weighted": {
-        "display_name": "F1 (weighted)",
-        "direction": "maximize",
-        "scorer": lambda y_true, y_pred: f1_score(y_true, y_pred, average="weighted"),
-        "greater_is_better": True,
-    },
-    "roc_auc_ovr": {
-        "display_name": "ROC-AUC (OvR)",
-        "direction": "maximize",
-        "scorer": lambda y_true, y_score: roc_auc_score(
-            y_true, y_score, multi_class="ovr"
-        ),
-        "greater_is_better": True,
-    },
+REGRESSION_METRIC_REGISTRY: Final[dict[str, dict[str, object]]] = {
+    "r2": {"label": "R2", "scorer": "r2"},
+    "mae": {"label": "MAE", "scorer": "neg_mean_absolute_error"},
+    "rmse": {"label": "RMSE", "scorer": "neg_root_mean_squared_error"},
+    # --- カスタム例 ---
+    # "my_metric": {
+    #     "label": "My Metric",
+    #     "scorer": {
+    #         "score_func": my_metric_func,
+    #         "greater_is_better": True,
+    #         "response_method": "predict",
+    #         "kwargs": {},
+    #     },
+    # },
 }
 
-
-# 回帰指標定義レジストリ
-REGRESSION_METRIC_REGISTRY: dict[str, dict[str, Any]] = {
-    "rmse": {
-        "display_name": "RMSE",
-        "direction": "minimize",
-        "scorer": lambda y_true, y_pred: root_mean_squared_error(
-            y_true, y_pred, squared=False
-        ),
-        "greater_is_better": False,
-    },
-    "mse": {
-        "display_name": "MSE",
-        "direction": "minimize",
-        "scorer": root_mean_squared_error,
-        "greater_is_better": False,
-    },
-    "mae": {
-        "display_name": "MAE",
-        "direction": "minimize",
-        "scorer": mean_absolute_error,
-        "greater_is_better": False,
-    },
-    "r2": {
-        "display_name": "R2",
-        "direction": "maximize",
-        "scorer": r2_score,
-        "greater_is_better": True,
-    },
+CLASSIFICATION_METRIC_REGISTRY: Final[dict[str, dict[str, object]]] = {
+    "accuracy": {"label": "Accuracy", "scorer": "accuracy"},
+    "f1_macro": {"label": "F1 (macro)", "scorer": "f1_macro"},
+    "precision_macro": {"label": "Precision (macro)", "scorer": "precision_macro"},
+    "recall_macro": {"label": "Recall (macro)", "scorer": "recall_macro"},
+    "roc_auc_ovr": {"label": "ROC-AUC (ovr)", "scorer": "roc_auc_ovr"},
+    # --- カスタム例 ---
+    # "my_auc": {
+    #     "label": "My AUC",
+    #     "scorer": {
+    #         "score_func": my_auc_func,
+    #         "greater_is_better": True,
+    #         "response_method": "predict_proba",
+    #         "kwargs": {},
+    #     },
+    # },
 }

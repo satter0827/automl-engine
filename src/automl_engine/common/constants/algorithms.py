@@ -18,7 +18,7 @@ from sklearn.svm import SVC, SVR
 # 分類モデル定義レジストリ。
 CLASSIFICATION_MODEL_REGISTRY = {
     "logreg": {
-        "display_name": "Logistic Regression",
+        "label": "Logistic Regression",
         "estimator_cls": LogisticRegression,
         "init_params": {
             "max_iter": 5000,
@@ -37,7 +37,7 @@ CLASSIFICATION_MODEL_REGISTRY = {
         },
     },
     "svm": {
-        "display_name": "Support Vector Machine (RBF)",
+        "label": "Support Vector Machine (RBF)",
         "estimator_cls": SVC,
         "init_params": {
             "kernel": "rbf",
@@ -59,7 +59,7 @@ CLASSIFICATION_MODEL_REGISTRY = {
         },
     },
     "rf": {
-        "display_name": "Random Forest Classifier",
+        "label": "Random Forest Classifier",
         "estimator_cls": RandomForestClassifier,
         "init_params": {
             "random_state": None,
@@ -86,7 +86,7 @@ CLASSIFICATION_MODEL_REGISTRY = {
         },
     },
     "nb": {
-        "display_name": "Gaussian Naive Bayes",
+        "label": "Gaussian Naive Bayes",
         "estimator_cls": GaussianNB,
         "init_params": {},
         "fit_params": {},
@@ -109,7 +109,7 @@ CLASSIFICATION_MODEL_REGISTRY = {
 # 回帰モデル定義レジストリ。
 REGRESSION_MODEL_REGISTRY = {
     "lr": {
-        "display_name": "Linear Regression",
+        "label": "Linear Regression",
         "estimator_cls": LinearRegression,
         "init_params": {
             "fit_intercept": True,
@@ -129,7 +129,7 @@ REGRESSION_MODEL_REGISTRY = {
         },
     },
     "ridge": {
-        "display_name": "Ridge Regression",
+        "label": "Ridge Regression",
         "estimator_cls": Ridge,
         "init_params": {
             "random_state": None,
@@ -155,7 +155,7 @@ REGRESSION_MODEL_REGISTRY = {
         },
     },
     "lasso": {
-        "display_name": "Lasso Regression",
+        "label": "Lasso Regression",
         "estimator_cls": Lasso,
         "init_params": {
             "random_state": None,
@@ -182,7 +182,7 @@ REGRESSION_MODEL_REGISTRY = {
         },
     },
     "elastic_net": {
-        "display_name": "Elastic Net",
+        "label": "Elastic Net",
         "estimator_cls": ElasticNet,
         "init_params": {
             "random_state": None,
@@ -206,7 +206,7 @@ REGRESSION_MODEL_REGISTRY = {
         },
     },
     "svr": {
-        "display_name": "Support Vector Regression (RBF)",
+        "label": "Support Vector Regression (RBF)",
         "estimator_cls": SVR,
         "init_params": {
             "kernel": "rbf",
@@ -229,7 +229,7 @@ REGRESSION_MODEL_REGISTRY = {
         },
     },
     "rf": {
-        "display_name": "Random Forest Regressor",
+        "label": "Random Forest Regressor",
         "estimator_cls": RandomForestRegressor,
         "init_params": {
             "random_state": None,

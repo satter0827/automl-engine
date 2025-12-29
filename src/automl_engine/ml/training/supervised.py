@@ -50,7 +50,7 @@ def run_supervised(
         学習済み推定器と評価結果の辞書.
     """
     # 評価指標の scorers を作成
-    scorers = {k: make_scorer(f) for k, f in metrics.items()}
+    scorers = _build_scoring(metrics)
 
     # 各アルゴリズムで学習・評価・探索を実行
     estimators: dict[str, BaseEstimator] = {}
@@ -98,6 +98,46 @@ def run_supervised(
     return estimators, results
 
 
+def _build_scoring(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """
+    metrics 定義から sklearn の scoring 辞書を生成する.
+
+    Args:
+        metrics: 評価指標定義.
+
+    Returns:
+        scoring: sklearn 用 scoring 辞書.
+    """
+    scoring: dict[str, Any] = {}
+    for key, spec in metrics.items():
+        scorer = spec["scorer"]
+
+        # 設計: dict なら make_scorer へ、そうでなければ scoring として素通し
+        if isinstance(scorer, dict):
+            score_func = scorer["score_func"]
+            greater_is_better = scorer.get("greater_is_better", True)
+            response_method = scorer.get("response_method")
+            kwargs = scorer.get("kwargs", {})
+
+            if response_method is None:
+                scoring[key] = make_scorer(
+                    score_func,
+                    greater_is_better=greater_is_better,
+                    **kwargs,
+                )
+            else:
+                scoring[key] = make_scorer(
+                    score_func,
+                    greater_is_better=greater_is_better,
+                    response_method=response_method,
+                    **kwargs,
+                )
+        else:
+            scoring[key] = scorer
+
+    return scoring
+
+
 def _run_grid(
     *,
     factory: Callable,
@@ -132,7 +172,10 @@ def _run_grid(
     model = _compose(preprocess, estimator)
     fit_params = _fit_params(model, sample_weight)
 
-    # クロスバリデーションで評価
+    params = dict(fit_params)
+    if groups is not None:
+        params["groups"] = groups
+
     cv_out = cross_validate(
         estimator=model,
         X=X,
@@ -140,13 +183,12 @@ def _run_grid(
         scoring=scorers,
         cv=cv,
         n_jobs=-1,
-        groups=groups,
-        fit_params=fit_params,
+        params=params,
         return_train_score=False,
     )
 
     # モデルの学習
-    model.fit(X, y, groups=groups, **fit_params)
+    model.fit(X, y, **fit_params)
 
     # 結果の返却
     return model, {
@@ -205,16 +247,18 @@ def _run_optuna(
         model = _compose(preprocess, est)
         fit_params = _fit_params(model, sample_weight)
 
-        # クロスバリデーションで評価
+        params = dict(fit_params)
+        if groups is not None:
+            params["groups"] = groups
+
         out = cross_validate(
             estimator=model,
             X=X,
             y=y,
-            scoring={primary_metric_key: scorers[primary_metric_key]},
+            scoring=scorers,
             cv=cv,
             n_jobs=-1,
-            groups=groups,
-            fit_params=fit_params,
+            params=params,
             return_train_score=False,
         )
 
@@ -233,7 +277,10 @@ def _run_optuna(
     # 最良モデルを学習
     best_model.fit(X, y, groups=groups, **best_fit_params)
 
-    # 最良モデルのクロスバリデーション評価
+    params = dict(best_fit_params)
+    if groups is not None:
+        params["groups"] = groups
+
     cv_out = cross_validate(
         estimator=best_model,
         X=X,
@@ -241,8 +288,7 @@ def _run_optuna(
         scoring=scorers,
         cv=cv,
         n_jobs=-1,
-        groups=groups,
-        fit_params=best_fit_params,
+        params=params,
         return_train_score=False,
     )
 
