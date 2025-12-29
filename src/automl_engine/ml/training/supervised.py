@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, cast
 
 import joblib
 import optuna
@@ -576,7 +576,6 @@ def _run_parallel_ray(
         ray.init(num_cpus=n_jobs, ignore_reinit_error=True)
 
     # リモート関数として登録
-    @ray.remote
     def execute_remote(
         key: str,
         factory: dict[str, Any],
@@ -610,13 +609,15 @@ def _run_parallel_ray(
             n_jobs_cv=n_jobs_cv,
         )
 
+    execute_remote_task = cast(Any, ray.remote(execute_remote))
+
     estimators: dict[str, BaseEstimator] = {}
     results: dict[str, dict[str, Any]] = {}
 
     # タスクを送信（キーとのマッピングを保持）
     future_to_key: dict[Any, str] = {}
     for key, factory in algorithms.items():
-        future = execute_remote.remote(
+        future = execute_remote_task.remote(
             key=key,
             factory=factory,
             scorers=scorers,
@@ -1084,5 +1085,4 @@ def _fit_params(
         return {"model__sample_weight": sample_weight}
 
     # それ以外はそのまま返す
-    return {"sample_weight": sample_weight}
     return {"sample_weight": sample_weight}

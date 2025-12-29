@@ -3,31 +3,6 @@ Registry dict バリデーション用Pydanticスキーマ.
 
 このモジュールは、algorithms.py および metrics.py で定義されている
 レジストリ辞書の構造を厳密に型定義し、バリデーションを可能にします。
-
-設計方針:
-    1. スキーマファイルの設置場所・ファイル名
-       - 設置場所: src/automl_engine/common/schema/
-       - ファイル名: 既存 regression.py に合わせ、registry.py
-
-    2. スキーマの構造/粒度
-       - 単一ファイルでまとめる
-       - ネストした BaseModel 構造で厳密に型定義（階層モデル化）
-
-    3. 型の厳密さ
-       - estimator_cls: Type[BaseEstimator] で型管理
-       - search_space.grid: 柔軟な型定義（値のリスト）
-       - search_space.optuna: type に Literal型を使い、type別に必須フィールドを定義
-         例: type: Literal["int", "float", "loguniform", "uniform", "categorical", "int_or_none"]
-       - Any型は極力避ける（score_funcなどcallableの場合は例外）
-
-    4. メトリクス部分
-       - scorer: Union[str, ScorerDictSchema]（callableは除外）
-       - ScorerDictSchemaでscore_func、greater_is_betterなど厳密に管理
-
-    5. コーディングスタイル
-       - regression.py に合わせて一貫性ある命名とスタイル
-       - Pydantic v2スタイル、ConfigDict(arbitrary_types_allowed=True)使用
-       - docstringは Google スタイル
 """
 
 from __future__ import annotations

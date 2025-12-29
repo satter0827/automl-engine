@@ -118,6 +118,8 @@ warn_return_any = true
 module = [
   "requests.*",
   "psutil",
+  "joblib",
+  "tqdm"
 ]
 ignore_missing_imports = true
 
