@@ -20,6 +20,10 @@ Thumbs.db
 # Logs / temp
 *.log
 *.tmp
+logs/
+
+# Logger config (actual file, not example)
+logger_config.ini
 
 # Python packaging
 *.egg-info/
