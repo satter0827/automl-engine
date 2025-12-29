@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import configparser
 import logging
-import os
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any
@@ -107,7 +106,7 @@ class LoggerManager:
         Raises:
             FileNotFoundError: 設定ファイルが見つからない場合
         """
-        if not os.path.exists(config_file):
+        if not Path(config_file).exists():
             raise FileNotFoundError(f"設定ファイルが見つかりません: {config_file}")
 
         # RawConfigParser を使用して % 記号のエスケープを不要にする
@@ -123,11 +122,16 @@ class LoggerManager:
             config["date_format"] = section.get("date_format", config["date_format"])
 
             # ローテーション設定
-            if section.get("rotation_when"):
-                config["rotation_when"] = section.get("rotation_when")
-            if section.get("rotation_interval"):
+            rotation_when = section.get("rotation_when")
+            if rotation_when is not None:
+                config["rotation_when"] = rotation_when
+
+            rotation_interval = section.get("rotation_interval")
+            if rotation_interval is not None:
                 config["rotation_interval"] = section.getint("rotation_interval")
-            if section.get("backup_count"):
+
+            backup_count = section.get("backup_count")
+            if backup_count is not None:
                 config["backup_count"] = section.getint("backup_count")
 
         return config
