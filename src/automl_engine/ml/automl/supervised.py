@@ -12,8 +12,6 @@ from sklearn.compose import ColumnTransformer
 from sklearn.model_selection import BaseCrossValidator, KFold
 from sklearn.pipeline import Pipeline
 
-from automl_engine.common.constants.algorithms import REGRESSION_MODEL_REGISTRY
-from automl_engine.common.constants.metrics import REGRESSION_METRIC_REGISTRY
 from automl_engine.common.schema.regression import (
     RegressionAnalyzerConfig,
     RegressionAnalyzerPrepareConfig,
