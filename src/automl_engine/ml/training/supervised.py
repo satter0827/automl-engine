@@ -215,9 +215,12 @@ def _execute_algorithm(
 
     Returns:
         アルゴリズムキー、学習済み推定器、評価情報のタプル.
+
+    Raises:
+        ValueError: 未サポートの探索手法が指定された場合.
     """
     try:
-        logger.info(f"アルゴリズム '{key}' の実行開始")
+        logger.info(f"アルゴリズム '{key}' の実行開始 (n_jobs_cv={n_jobs_cv})")
 
         if search_method == "grid":
             # グリッドサーチで学習・評価を実行
@@ -245,6 +248,21 @@ def _execute_algorithm(
                 y=y,
                 optuna_trials=optuna_trials,
                 optuna_timeout=optuna_timeout,
+                sample_weight=sample_weight,
+                groups=groups,
+                n_jobs_cv=n_jobs_cv,
+            )
+        elif search_method is None:
+            # search_method=None の場合はデフォルトで grid を使用
+            logger.warning(f"アルゴリズム '{key}': search_method が None のため grid を使用")
+            est, info = _run_grid(
+                factory=factory["estimator_cls"],
+                scorers=scorers,
+                primary_metric_key=primary_metric_key,
+                preprocess=preprocess,
+                cv=cv,
+                X=X,
+                y=y,
                 sample_weight=sample_weight,
                 groups=groups,
                 n_jobs_cv=n_jobs_cv,
@@ -306,7 +324,7 @@ def _run_parallel_joblib(
     estimators: dict[str, BaseEstimator] = {}
     results: dict[str, dict[str, Any]] = {}
 
-    # joblib で並列実行（タイムアウトは個別に処理）
+    # joblib で並列実行
     tasks = [
         joblib.delayed(_execute_algorithm)(
             key=key,
@@ -584,9 +602,10 @@ def _run_parallel_ray(
     estimators: dict[str, BaseEstimator] = {}
     results: dict[str, dict[str, Any]] = {}
 
-    # タスクを送信
-    futures = [
-        execute_remote.remote(
+    # タスクを送信（キーとのマッピングを保持）
+    future_to_key: dict[Any, str] = {}
+    for key, factory in algorithms.items():
+        future = execute_remote.remote(
             key=key,
             factory=factory,
             scorers=scorers,
@@ -602,12 +621,12 @@ def _run_parallel_ray(
             groups=groups,
             n_jobs_cv=n_jobs_cv,
         )
-        for key, factory in algorithms.items()
-    ]
+        future_to_key[future] = key
 
     # tqdm で進捗表示
     with tqdm(total=len(algorithms), desc="アルゴリズム実行", unit="algo") as pbar:
         # 完了した順に結果を取得
+        futures = list(future_to_key.keys())
         while futures:
             # タイムアウト付きで待機
             ready, not_ready = ray.wait(
@@ -615,17 +634,16 @@ def _run_parallel_ray(
             )
 
             for future in ready:
+                key = future_to_key.get(future, "unknown")
                 try:
-                    key, est, info = ray.get(future)
-                    estimators[key] = est
-                    results[key] = info
+                    key_result, est, info = ray.get(future)
+                    estimators[key_result] = est
+                    results[key_result] = info
                     progress_info["completed"] += 1
-                    progress_info["results"][key] = {"status": "success", "info": info}
-                    logger.info(f"アルゴリズム '{key}' が成功")
+                    progress_info["results"][key_result] = {"status": "success", "info": info}
+                    logger.info(f"アルゴリズム '{key_result}' が成功")
 
                 except Exception as e:
-                    # キー情報を取得（エラー時）
-                    key = "unknown"
                     logger.error(f"アルゴリズム '{key}' が失敗: {str(e)}")
                     progress_info["failed"].append(key)
                     progress_info["results"][key] = {"status": "failed", "error": str(e)}
