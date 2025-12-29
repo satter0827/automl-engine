@@ -10,9 +10,9 @@ scorer は以下を許容:
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any
 
-REGRESSION_METRIC_REGISTRY: Final[dict[str, dict[str, object]]] = {
+REGRESSION_METRIC_REGISTRY: dict[str, dict[str, Any]] = {
     "r2": {"label": "R2", "scorer": "r2"},
     "mae": {"label": "MAE", "scorer": "neg_mean_absolute_error"},
     "rmse": {"label": "RMSE", "scorer": "neg_root_mean_squared_error"},
@@ -28,7 +28,7 @@ REGRESSION_METRIC_REGISTRY: Final[dict[str, dict[str, object]]] = {
     # },
 }
 
-CLASSIFICATION_METRIC_REGISTRY: Final[dict[str, dict[str, object]]] = {
+CLASSIFICATION_METRIC_REGISTRY: dict[str, dict[str, Any]] = {
     "accuracy": {"label": "Accuracy", "scorer": "accuracy"},
     "f1_macro": {"label": "F1 (macro)", "scorer": "f1_macro"},
     "precision_macro": {"label": "Precision (macro)", "scorer": "precision_macro"},

@@ -18,8 +18,8 @@ def run_supervised(
     X: Any,
     y: Any,
     *,
-    algorithms: dict[str, dict[str, Callable[..., Any]]],
-    metrics: dict[str, dict[str, Callable[..., Any]]],
+    algorithms: dict[str, dict[str, Any]],
+    metrics: dict[str, dict[str, Any]],
     primary_metric_key: str,
     preprocess: Optional[Pipeline | ColumnTransformer] = None,
     cv: BaseCrossValidator,
@@ -58,6 +58,8 @@ def run_supervised(
 
     # アルゴリズムごとに処理を実行
     for key, factory in algorithms.items():
+        print(key)
+
         if search_method == "grid":
             # グリッドサーチで学習・評価を実行
             est, info = _run_grid(

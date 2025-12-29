@@ -203,8 +203,8 @@ class RegressionAnalyzer:
 
         # 設定の正規化と検証を実行
         validated = RegressionTrainConfig(
-            algorithms=algorithms or REGRESSION_MODEL_REGISTRY,
-            metrics=metrics or REGRESSION_METRIC_REGISTRY,
+            algorithms=algorithms,
+            metrics=metrics,
             primary_metric_key=primary_metric_key,
             search_method=search_method,
             optuna_trials=optuna_trials,

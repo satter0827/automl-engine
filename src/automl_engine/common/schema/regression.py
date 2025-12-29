@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -155,11 +155,11 @@ class RegressionTrainConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    algorithms: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    metrics: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    algorithms: Optional[str | list[str] | dict[str, dict[str, Any]]] = None
+    metrics: Optional[str | list[str] | dict[str, dict[str, Any]]] = None
     primary_metric_key: str | None = None
 
-    search_method: Literal["grid", "optuna"] = "grid"
+    search_method: Optional[Literal["grid", "optuna"]] = None
     optuna_trials: int = Field(default=50, ge=1)
     optuna_timeout: int | None = Field(default=None, ge=1)
 
@@ -181,20 +181,6 @@ class RegressionTrainConfig(BaseModel):
                     raise ValueError(f"Unknown algorithm key: {key!r}")
                 out[str(key)] = dict(REGRESSION_MODEL_REGISTRY[str(key)])
             return out
-
-        if isinstance(v, dict):
-            out2: dict[str, dict[str, Any]] = {}
-            for k, spec in v.items():
-                if not isinstance(spec, dict):
-                    raise TypeError(f"Algorithm spec must be dict: {k!r}")
-                # Validate that the key exists in the registry
-                if str(k) not in REGRESSION_MODEL_REGISTRY:
-                    raise ValueError(
-                        f"Unknown algorithm key: {k!r}. "
-                        f"Valid keys are: {list(REGRESSION_MODEL_REGISTRY.keys())}"
-                    )
-                out2[str(k)] = dict(spec)
-            return out2
 
         raise TypeError("algorithms must be None, str, list[str], or dict[str, dict].")
 
@@ -255,12 +241,19 @@ class RegressionTrainConfig(BaseModel):
         raise TypeError("metrics must be None, str, list[str], or dict[str, dict].")
 
     @model_validator(mode="after")
-    def _v_primary_metric_key(self) -> "RegressionTrainConfig":
+    def _v_primary_metric_key(self) -> RegressionTrainConfig:
         if not self.metrics:
             raise ValueError("metrics must not be empty")
+
         if self.primary_metric_key is None:
-            self.primary_metric_key = next(iter(self.metrics.keys()))
+            if isinstance(self.metrics, list):
+                self.primary_metric_key = self.metrics[0]
+
+            if isinstance(self.metrics, dict):
+                self.primary_metric_key = next(iter(self.metrics.keys()))
+
             return self
+
         if self.primary_metric_key not in self.metrics:
             raise ValueError("primary_metric_key must exist in metrics")
         return self
