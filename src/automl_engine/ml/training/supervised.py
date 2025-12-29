@@ -7,7 +7,7 @@ from __future__ import annotations
 import logging
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor, TimeoutError, as_completed
-from typing import Any, Callable, Literal, Optional
+from typing import Any, Literal, Optional
 
 import joblib
 import optuna
@@ -15,7 +15,7 @@ import ray
 from sklearn.base import BaseEstimator
 from sklearn.compose import ColumnTransformer
 from sklearn.metrics import make_scorer
-from sklearn.model_selection import BaseCrossValidator, cross_validate
+from sklearn.model_selection import BaseCrossValidator, GridSearchCV, cross_validate
 from sklearn.pipeline import Pipeline
 from tqdm import tqdm
 
@@ -48,14 +48,22 @@ def run_supervised(
     Args:
         X: 特徴量データ.
         y: 目的変数.
-        algorithms: 推定器生成 Callable 群.
-        metrics: 評価指標 Callable 群.
+        algorithms: アルゴリズム定義辞書。各エントリは以下の構造を持つ:
+            - estimator_cls: 推定器クラス（scikit-learn の BaseEstimator）
+            - init_params: 推定器の初期化パラメータ
+            - search_space: パラメータ探索空間（grid と optuna のキーを含む）
+        metrics: 評価指標定義辞書。各エントリは以下の構造を持つ:
+            - label: 評価指標のラベル
+            - scorer: 評価指標の scorer（str、callable、または dict）
         primary_metric_key: 最適化対象の評価指標キー.
         preprocess: 前処理パイプライン.
         cv: クロスバリデーション分割器.
-        search_method: 探索手法（grid / optuna）.
-        optuna_trials: Optuna の試行回数.
-        optuna_timeout: Optuna のタイムアウト秒数.
+        search_method: 探索手法。以下のいずれか:
+            - "grid": search_space["grid"] を使用して GridSearchCV を実行
+            - "optuna": search_space["optuna"] を使用して Optuna で最適化
+            - None: パラメータ探索を行わず、init_params のみでクロスバリデーション実行
+        optuna_trials: Optuna の試行回数（search_method="optuna" の場合のみ使用）.
+        optuna_timeout: Optuna のタイムアウト秒数（search_method="optuna" の場合のみ使用）.
         sample_weight: サンプル重み.
         groups: CV 用グループ.
         n_jobs: アルゴリズム並列数（-1で全コア使用）.
@@ -64,7 +72,7 @@ def run_supervised(
         algorithm_timeout: アルゴリズムごとのタイムアウト秒数.
 
     Returns:
-        学習済み推定器と評価結果の辞書.
+        学習済み推定器と評価結果の辞書のタプル.
     """
     # 評価指標の scorers を作成
     scorers = _build_scoring(metrics)
@@ -200,14 +208,14 @@ def _execute_algorithm(
 
     Args:
         key: アルゴリズムキー.
-        factory: 推定器生成 Callable を含む辞書.
+        factory: 推定器定義を含む辞書（estimator_cls, init_params, search_space を含む）.
         scorers: 評価指標 scorers.
         primary_metric_key: 主評価指標キー.
         preprocess: 前処理.
         cv: クロスバリデーション.
         X: 特徴量.
         y: 目的変数.
-        search_method: 探索手法.
+        search_method: 探索手法（"grid", "optuna", None）.
         optuna_trials: Optuna 試行回数.
         optuna_timeout: Optuna タイムアウト秒数.
         sample_weight: サンプル重み.
@@ -226,7 +234,9 @@ def _execute_algorithm(
         if search_method == "grid":
             # グリッドサーチで学習・評価を実行
             est, info = _run_grid(
-                factory=factory["estimator_cls"],
+                estimator_cls=factory["estimator_cls"],
+                init_params=factory.get("init_params", {}),
+                search_space=factory.get("search_space", {}).get("grid", {}),
                 scorers=scorers,
                 primary_metric_key=primary_metric_key,
                 preprocess=preprocess,
@@ -240,7 +250,9 @@ def _execute_algorithm(
         elif search_method == "optuna":
             # Optuna で学習・評価・探索を実行
             est, info = _run_optuna(
-                factory=factory["estimator_cls"],
+                estimator_cls=factory["estimator_cls"],
+                init_params=factory.get("init_params", {}),
+                search_space=factory.get("search_space", {}).get("optuna", {}),
                 scorers=scorers,
                 primary_metric_key=primary_metric_key,
                 preprocess=preprocess,
@@ -254,12 +266,19 @@ def _execute_algorithm(
                 n_jobs_cv=n_jobs_cv,
             )
         elif search_method is None:
+<<<<<<< HEAD
             # search_method=None の場合はデフォルトで grid を使用
             logger.warning(
                 f"アルゴリズム '{key}': search_method が None のため grid を使用"
             )
             est, info = _run_grid(
                 factory=factory["estimator_cls"],
+=======
+            # デフォルトパラメータでクロスバリデーションを実行
+            est, info = _run_default(
+                estimator_cls=factory["estimator_cls"],
+                init_params=factory.get("init_params", {}),
+>>>>>>> 746f799aa4cfc4cff4429a336fca46ea5567c491
                 scorers=scorers,
                 primary_metric_key=primary_metric_key,
                 preprocess=preprocess,
@@ -271,7 +290,6 @@ def _execute_algorithm(
                 n_jobs_cv=n_jobs_cv,
             )
         else:
-            # パラメタチューニングを行わずに学習・評価を実行
             raise ValueError(f"未サポートの探索手法: {search_method}")
 
         logger.info(f"アルゴリズム '{key}' の実行完了")
@@ -706,7 +724,9 @@ def _build_scoring(metrics: dict[str, dict[str, Any]]) -> dict[str, Any]:
 
 def _run_grid(
     *,
-    factory: Callable,
+    estimator_cls: type[BaseEstimator],
+    init_params: dict[str, Any],
+    search_space: dict[str, Any],
     scorers: dict[str, Any],
     primary_metric_key: str,
     preprocess: Optional[Pipeline | ColumnTransformer],
@@ -718,10 +738,12 @@ def _run_grid(
     n_jobs_cv: int = -1,
 ) -> tuple[BaseEstimator, dict[str, Any]]:
     """
-    Grid（固定パラメータ）で学習・評価を行う.
+    GridSearchCV によるパラメータ探索を行う.
 
     Args:
-        factory: 推定器生成 Callable.
+        estimator_cls: 推定器クラス.
+        init_params: 推定器の初期化パラメータ.
+        search_space: グリッドサーチ用パラメータ空間.
         scorers: 評価指標 scorers.
         primary_metric_key: 主評価指標キー.
         preprocess: 前処理.
@@ -735,40 +757,82 @@ def _run_grid(
     Returns:
         学習済み推定器と評価情報.
     """
-    # 推定器の生成
-    estimator = factory()
+    # 推定器の生成（init_params を使用）
+    estimator = estimator_cls(**init_params)
     model = _compose(preprocess, estimator)
     fit_params = _fit_params(model, sample_weight)
 
-    params = dict(fit_params)
-    if groups is not None:
-        params["groups"] = groups
+    # search_space が空の場合はパラメータ探索なしで学習
+    if not search_space:
+        params = dict(fit_params)
+        if groups is not None:
+            params["groups"] = groups
 
-    cv_out = cross_validate(
+        cv_out = cross_validate(
+            estimator=model,
+            X=X,
+            y=y,
+            scoring=scorers,
+            cv=cv,
+            n_jobs=n_jobs_cv,
+            params=params,
+            return_train_score=False,
+        )
+
+        # モデルの学習
+        model.fit(X, y, **fit_params)
+
+        # 結果の返却
+        return model, {
+            "search_method": "grid",
+            "cv_scores_mean": {k: float(cv_out[f"test_{k}"].mean()) for k in scorers},
+            "primary_score_mean": float(cv_out[f"test_{primary_metric_key}"].mean()),
+        }
+
+    # GridSearchCV でパラメータ探索
+    # Pipeline の場合、パラメータ名に "model__" を付ける
+    if isinstance(model, Pipeline):
+        param_grid = {f"model__{k}": v for k, v in search_space.items()}
+    else:
+        param_grid = search_space
+
+    grid_search = GridSearchCV(
         estimator=model,
-        X=X,
-        y=y,
+        param_grid=param_grid,
         scoring=scorers,
+        refit=primary_metric_key,
         cv=cv,
         n_jobs=n_jobs_cv,
-        params=params,
         return_train_score=False,
     )
 
-    # モデルの学習
-    model.fit(X, y, **fit_params)
+    # GridSearchCV の fit
+    if groups is not None:
+        grid_search.fit(X, y, groups=groups, **fit_params)
+    else:
+        grid_search.fit(X, y, **fit_params)
+
+    # 最良モデルを取得
+    best_model = grid_search.best_estimator_
 
     # 結果の返却
-    return model, {
+    cv_scores_mean = {
+        k: float(grid_search.cv_results_[f"mean_test_{k}"][grid_search.best_index_]) for k in scorers
+    }
+    return best_model, {
         "search_method": "grid",
-        "cv_scores_mean": {k: float(cv_out[f"test_{k}"].mean()) for k in scorers},
-        "primary_score_mean": float(cv_out[f"test_{primary_metric_key}"].mean()),
+        "best_params": grid_search.best_params_,
+        "best_score": float(grid_search.best_score_),
+        "cv_scores_mean": cv_scores_mean,
+        "primary_score_mean": float(grid_search.best_score_),
     }
 
 
 def _run_optuna(
     *,
-    factory: Callable,
+    estimator_cls: type[BaseEstimator],
+    init_params: dict[str, Any],
+    search_space: dict[str, Any],
     scorers: dict[str, Any],
     primary_metric_key: str,
     preprocess: Optional[Pipeline | ColumnTransformer],
@@ -785,7 +849,9 @@ def _run_optuna(
     Optuna によるハイパーパラメータ探索を行う.
 
     Args:
-        factory: trial を受け取る推定器生成 Callable.
+        estimator_cls: 推定器クラス.
+        init_params: 推定器の初期化パラメータ.
+        search_space: Optuna 用パラメータ空間定義.
         scorers: 評価指標 scorers.
         primary_metric_key: 主評価指標キー.
         preprocess: 前処理.
@@ -812,8 +878,38 @@ def _run_optuna(
         Returns:
             float: 主要評価指標の平均スコア.
         """
+        # パラメータのサンプリング
+        trial_params = dict(init_params)
+        for param_name, param_spec in search_space.items():
+            if isinstance(param_spec, dict) and "type" in param_spec:
+                param_type = param_spec["type"]
+                if param_type == "loguniform":
+                    trial_params[param_name] = trial.suggest_float(
+                        param_name, param_spec["low"], param_spec["high"], log=True
+                    )
+                elif param_type == "uniform":
+                    trial_params[param_name] = trial.suggest_float(
+                        param_name, param_spec["low"], param_spec["high"]
+                    )
+                elif param_type == "int":
+                    trial_params[param_name] = trial.suggest_int(
+                        param_name, param_spec["low"], param_spec["high"]
+                    )
+                elif param_type == "int_or_none":
+                    # None を含む整数の選択
+                    if trial.suggest_categorical(f"{param_name}_is_none", [True, False]):
+                        trial_params[param_name] = None
+                    else:
+                        trial_params[param_name] = trial.suggest_int(
+                            param_name, param_spec["low"], param_spec["high"]
+                        )
+                elif param_type == "categorical":
+                    trial_params[param_name] = trial.suggest_categorical(
+                        param_name, param_spec["choices"]
+                    )
+
         # 推定器の生成
-        est = factory(trial)
+        est = estimator_cls(**trial_params)
         model = _compose(preprocess, est)
         fit_params = _fit_params(model, sample_weight)
 
@@ -839,13 +935,19 @@ def _run_optuna(
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=optuna_trials, timeout=optuna_timeout)
 
-    # 最良モデルの学習と評価
-    best_estimator = factory(study.best_trial)
+    # 最良パラメータで推定器を生成
+    best_params = dict(init_params)
+    for param_name, param_value in study.best_trial.params.items():
+        # int_or_none の場合の特殊処理
+        if not param_name.endswith("_is_none"):
+            best_params[param_name] = param_value
+
+    best_estimator = estimator_cls(**best_params)
     best_model = _compose(preprocess, best_estimator)
     best_fit_params = _fit_params(best_model, sample_weight)
 
     # 最良モデルを学習
-    best_model.fit(X, y, groups=groups, **best_fit_params)
+    best_model.fit(X, y, **best_fit_params)
 
     params = dict(best_fit_params)
     if groups is not None:
@@ -868,6 +970,74 @@ def _run_optuna(
         "best_value": float(study.best_value),
         "best_params": dict(study.best_trial.params),
         "cv_scores_mean": {k: float(cv_out[f"test_{k}"].mean()) for k in scorers},
+    }
+
+
+def _run_default(
+    *,
+    estimator_cls: type[BaseEstimator],
+    init_params: dict[str, Any],
+    scorers: dict[str, Any],
+    primary_metric_key: str,
+    preprocess: Optional[Pipeline | ColumnTransformer],
+    cv: BaseCrossValidator,
+    X: Any,
+    y: Any,
+    sample_weight: Optional[Any],
+    groups: Optional[Any],
+    n_jobs_cv: int = -1,
+) -> tuple[BaseEstimator, dict[str, Any]]:
+    """
+    デフォルトパラメータでクロスバリデーションを実行する.
+
+    パラメータ探索は行わず、init_params で指定されたパラメータのみを使用して
+    推定器をインスタンス化し、クロスバリデーションを実行する。
+
+    Args:
+        estimator_cls: 推定器クラス.
+        init_params: 推定器の初期化パラメータ.
+        scorers: 評価指標 scorers.
+        primary_metric_key: 主評価指標キー.
+        preprocess: 前処理.
+        cv: クロスバリデーション.
+        X: 特徴量.
+        y: 目的変数.
+        sample_weight: サンプル重み.
+        groups: CV 用グループ.
+        n_jobs_cv: CV 並列数.
+
+    Returns:
+        学習済み推定器と評価情報.
+    """
+    # 推定器の生成（init_params のみを使用）
+    estimator = estimator_cls(**init_params)
+    model = _compose(preprocess, estimator)
+    fit_params = _fit_params(model, sample_weight)
+
+    params = dict(fit_params)
+    if groups is not None:
+        params["groups"] = groups
+
+    # クロスバリデーションの実行
+    cv_out = cross_validate(
+        estimator=model,
+        X=X,
+        y=y,
+        scoring=scorers,
+        cv=cv,
+        n_jobs=n_jobs_cv,
+        params=params,
+        return_train_score=False,
+    )
+
+    # モデルの学習
+    model.fit(X, y, **fit_params)
+
+    # 結果の返却
+    return model, {
+        "search_method": "default",
+        "cv_scores_mean": {k: float(cv_out[f"test_{k}"].mean()) for k in scorers},
+        "primary_score_mean": float(cv_out[f"test_{primary_metric_key}"].mean()),
     }
 
 
