@@ -4,6 +4,8 @@ AutoML 実行時に使用可能な分類モデルを辞書形式で定義する�
 
 from __future__ import annotations
 
+from catboost import CatBoostClassifier, CatBoostRegressor
+from lightgbm import LGBMClassifier, LGBMRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import (
     ElasticNet,
@@ -14,6 +16,7 @@ from sklearn.linear_model import (
 )
 from sklearn.naive_bayes import GaussianNB
 from sklearn.svm import SVC, SVR
+from xgboost import XGBClassifier, XGBRegressor
 
 # 分類モデル定義レジストリ。
 CLASSIFICATION_MODEL_REGISTRY = {
@@ -101,6 +104,42 @@ CLASSIFICATION_MODEL_REGISTRY = {
                     "high": 1e-6,
                 },
             },
+        },
+    },
+    "xgb": {
+        "label": "XGBoost Classifier",
+        "estimator_cls": XGBClassifier,
+        "init_params": {
+            "tree_method": "gpu_hist",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {},
+            "optuna": {},
+        },
+    },
+    "lgbm": {
+        "label": "LightGBM Classifier",
+        "estimator_cls": LGBMClassifier,
+        "init_params": {
+            "device_type": "gpu",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {},
+            "optuna": {},
+        },
+    },
+    "catboost": {
+        "label": "CatBoost Classifier",
+        "estimator_cls": CatBoostClassifier,
+        "init_params": {
+            "task_type": "GPU",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {},
+            "optuna": {},
         },
     },
 }
@@ -253,6 +292,42 @@ REGRESSION_MODEL_REGISTRY = {
                     "choices": ["sqrt", "log2", None],
                 },
             },
+        },
+    },
+    "xgb": {
+        "label": "XGBoost Regressor",
+        "estimator_cls": XGBRegressor,
+        "init_params": {
+            "tree_method": "gpu_hist",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {},
+            "optuna": {},
+        },
+    },
+    "lgbm": {
+        "label": "LightGBM Regressor",
+        "estimator_cls": LGBMRegressor,
+        "init_params": {
+            "device_type": "gpu",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {},
+            "optuna": {},
+        },
+    },
+    "catboost": {
+        "label": "CatBoost Regressor",
+        "estimator_cls": CatBoostRegressor,
+        "init_params": {
+            "task_type": "GPU",
+        },
+        "fit_params": {},
+        "search_space": {
+            "grid": {},
+            "optuna": {},
         },
     },
 }
