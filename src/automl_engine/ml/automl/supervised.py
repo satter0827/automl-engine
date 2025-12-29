@@ -182,6 +182,12 @@ class RegressionAnalyzer:
         search_method: Optional[Literal["grid", "optuna"]] = None,
         optuna_trials: int = 50,
         optuna_timeout: Optional[int] = None,
+        sample_weight: Optional[Any] = None,
+        groups: Optional[Any] = None,
+        n_jobs: int = -1,
+        n_jobs_cv: Optional[int] = None,
+        parallel_backend: Literal["joblib", "concurrent", "ray"] = "joblib",
+        algorithm_timeout: Optional[int] = None,
     ) -> RegressionAnalyzer:
         """
         回帰モデルの探索・学習・評価を実行する.
@@ -190,6 +196,15 @@ class RegressionAnalyzer:
             algorithms: 使用する回帰アルゴリズムの指定.
             metrics: 使用する評価指標の指定.
             primary_metric_key: 最適化対象の主要評価指標のキー.
+            search_method: 探索手法.
+            optuna_trials: Optuna の試行回数.
+            optuna_timeout: Optuna のタイムアウト秒数.
+            sample_weight: サンプル重み.
+            groups: CV 用グループ.
+            n_jobs: アルゴリズム並列数.
+            n_jobs_cv: CV 並列数.
+            parallel_backend: 並列バックエンド.
+            algorithm_timeout: アルゴリズムごとのタイムアウト秒数.
 
 
         Returns:
@@ -232,6 +247,12 @@ class RegressionAnalyzer:
             search_method=self.search_method,
             optuna_trials=self.optuna_trials,
             optuna_timeout=self.optuna_timeout,
+            sample_weight=sample_weight,
+            groups=groups,
+            n_jobs=n_jobs,
+            n_jobs_cv=n_jobs_cv,
+            parallel_backend=parallel_backend,
+            algorithm_timeout=algorithm_timeout,
         )
 
         # 学習完了フラグを立てる
