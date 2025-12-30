@@ -17,6 +17,7 @@ from automl_engine.common.schema.regression import (
     RegressionAnalyzerPrepareConfig,
     RegressionTrainConfig,
 )
+from automl_engine.ml.prediction import predict_supervised
 from automl_engine.ml.training.supervised import run_supervised
 
 
@@ -260,17 +261,27 @@ class RegressionAnalyzer:
 
         return self
 
-    def predict(self, X: Any) -> Any:
+    def predict(self, X: Any, algorithm: Optional[str] = None) -> Any:
         """
         最良モデルを用いて予測を行う.
 
         Args:
             X: 予測対象の特徴量データ.
+            algorithm: 使用するアルゴリズムキー（省略時は最良モデル）.
 
         Returns:
             Any: 予測結果.
         """
-        return None
+        if not self._is_trained:
+            raise RuntimeError("学習が完了していません。train() を実行してください。")
+
+        return predict_supervised(
+            X,
+            estimators=self.fitted_model,
+            model_info=self.model_info,
+            primary_metric_key=self.primary_metric_key,
+            algorithm=algorithm,
+        )
 
     def evaluate(self, X: Any, y: Any) -> dict[str, float]:
         """
