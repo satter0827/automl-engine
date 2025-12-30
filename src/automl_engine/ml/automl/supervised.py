@@ -272,47 +272,42 @@ class RegressionAnalyzer:
         """
         return None
 
-    def evaluate(self, X: Any, y: Any) -> dict[str, float]:
-        """
-        学習済みモデルを用いて評価を行う.
-
-        primary metric を含むすべての評価指標を算出する.
-
-        Args:
-            X: 評価用特徴量データ.
-            y: 正解ターゲット.
-
-        Returns:
-            dict[str, float]: 評価指標名をキー、スコアを値とする辞書.
-        """
-        return {"dummy_metric": 0.0}
-
-    def finalize(self) -> Pipeline:
-        """
-        最良モデルを確定し、デプロイ可能な形で出力する.
-
-        Returns:
-            Pipeline: デプロイ可能な最良モデルパイプライン.
-        """
-        return BaseEstimator()
-
-    def compare(self) -> Any:
-        """
-        探索対象となったモデル群の比較結果を返す.
-
-        各モデルの平均スコア、分散、学習時間などを含む.
-
-        Returns:
-            Any: モデル比較結果（ダミー）.
-        """
-        return []
-
     def inspect(self) -> dict[str, Any]:
         """
         クロスバリデーションや探索過程の詳細結果を取得する.
 
         Returns:
             dict[str, Any]: fold / trial 単位の詳細評価結果.
+        """
+        return {}
+
+    def compare(
+        self,
+        metrics: Optional[
+            str | list[str] | dict[str, dict[str, Callable[..., Any]]]
+        ] = None,
+        algorithms: Optional[
+            str | list[str] | dict[str, dict[str, Callable[..., Any]]]
+        ] = None,
+    ) -> Any:
+        """
+        学習済みモデル群の比較を行う.
+
+        Args:
+            None
+
+        Returns:
+            Any: モデル比較結果（ダミー）.
+        """
+        return []
+
+    def visualize(self) -> dict[str, Any]:
+        """
+        学習済みモデルや評価結果の可視化情報を生成する.
+        可視化自体は行わない.
+
+        Returns:
+            dict[str, Any]: 可視化情報.
         """
         return {}
 
@@ -324,6 +319,15 @@ class RegressionAnalyzer:
             dict[str, Any]:モデル解釈情報.
         """
         return {}
+
+    def finalize(self) -> Pipeline:
+        """
+        最良モデルを確定し、デプロイ可能な形で出力する.
+
+        Returns:
+            Pipeline: デプロイ可能な最良モデルパイプライン.
+        """
+        return BaseEstimator()
 
     def summarize(self) -> dict[str, Any]:
         """
